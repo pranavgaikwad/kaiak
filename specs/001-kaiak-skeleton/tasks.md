@@ -27,12 +27,12 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create Rust project structure with Cargo.toml in repository root
-- [ ] T002 [P] Configure dependencies in Cargo.toml (goose, tower-lsp, tokio, serde, anyhow)
-- [ ] T003 [P] Setup linting and formatting tools (cargo clippy, rustfmt configuration)
-- [ ] T004 [P] Create GitHub Actions CI pipeline in .github/workflows/ci.yml
-- [ ] T005 [P] Create local development scripts in scripts/ directory (ci.sh, test.sh, lint.sh)
-- [ ] T006 [P] Setup basic logging infrastructure in src/config/mod.rs
+- [x] T001 Create Rust project structure with Cargo.toml in repository root
+- [x] T002 [P] Configure dependencies in Cargo.toml (goose, tower-lsp, tokio, serde, anyhow)
+- [x] T003 [P] Setup linting and formatting tools (cargo clippy, rustfmt configuration)
+- [x] T004 [P] Create GitHub Actions CI pipeline in .github/workflows/ci.yml
+- [x] T005 [P] Create local development scripts in scripts/ directory (ci.sh, test.sh, lint.sh)
+- [x] T006 [P] Setup basic logging infrastructure in src/config/mod.rs
 
 ---
 
@@ -42,14 +42,14 @@ description: "Task list template for feature implementation"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Setup JSON-RPC transport layer in src/server/transport.rs with stdio support
-- [ ] T008 [P] Implement JSON-RPC protocol handling in src/server/jsonrpc.rs using tower-lsp
-- [ ] T009 [P] Create core data models in src/models/mod.rs with basic serialization
-- [ ] T010 [P] Setup configuration management in src/config/settings.rs with environment variables
-- [ ] T011 [P] Implement Goose agent integration foundation in src/goose/mod.rs
-- [ ] T012 [P] Create error handling infrastructure in src/lib.rs with anyhow integration
-- [ ] T013 [P] Setup structured logging throughout system with tracing crate
-- [ ] T014 Create main application entry point in src/main.rs with CLI argument parsing
+- [x] T007 Setup JSON-RPC transport layer in src/server/transport.rs with stdio support
+- [x] T008 [P] Implement JSON-RPC protocol handling in src/server/jsonrpc.rs using tower-lsp
+- [x] T009 [P] Create core data models in src/models/mod.rs with basic serialization
+- [x] T010 [P] Setup configuration management in src/config/settings.rs with environment variables
+- [x] T011 [P] Implement Goose agent integration foundation in src/goose/mod.rs
+- [x] T012 [P] Create error handling infrastructure in src/lib.rs with anyhow integration
+- [x] T013 [P] Setup structured logging throughout system with tracing crate
+- [x] T014 Create main application entry point in src/main.rs with CLI argument parsing
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
