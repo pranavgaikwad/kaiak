@@ -3,8 +3,7 @@
 //! A standalone server integrating Goose AI agent for code migration workflows.
 //! Provides LSP-style JSON-RPC communication for IDE extensions.
 
-use anyhow::{Context, Result};
-use std::fmt;
+use anyhow::Result;
 
 pub mod config;
 pub mod server;

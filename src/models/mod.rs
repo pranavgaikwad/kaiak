@@ -48,6 +48,13 @@ pub enum Severity {
     Info,
 }
 
+impl Severity {
+    /// Check if this severity level is considered high priority
+    pub fn is_high_priority(&self) -> bool {
+        matches!(self, Severity::Error)
+    }
+}
+
 /// Helper trait for generating unique identifiers
 pub trait Identifiable {
     fn generate_id() -> Id {

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use kaiak::config::{init_logging, settings::Settings};
-use kaiak::server::transport::{Transport, TransportConfig};
+use kaiak::server::{start_server, TransportConfig};
 use tracing::{error, info};
 
 #[derive(Parser)]
@@ -13,11 +13,11 @@ struct Cli {
     command: Commands,
 
     /// Set log level (trace, debug, info, warn, error)
-    #[arg(long, global = true, env = "KAIAK_LOG_LEVEL")]
+    #[arg(long, global = true)]
     log_level: Option<String>,
 
     /// Configuration file path
-    #[arg(long, global = true, env = "KAIAK_CONFIG_PATH")]
+    #[arg(long, global = true)]
     config: Option<String>,
 }
 
@@ -34,7 +34,7 @@ enum Commands {
         socket_path: Option<String>,
 
         /// Workspace root path
-        #[arg(long, env = "KAIAK_WORKSPACE_ROOT")]
+        #[arg(long)]
         workspace: Option<String>,
     },
 
@@ -107,23 +107,13 @@ async fn serve_command(transport_type: String, socket_path: Option<String>) -> R
         _ => anyhow::bail!("Invalid transport type: {}", transport_type),
     };
 
-    info!("Initializing server with transport: {:?}", transport_config);
+    info!("Initializing Kaiak LSP server with transport: {:?}", transport_config);
 
-    // TODO: Initialize the actual language server implementation
-    // For now, create a placeholder transport
-    let transport = Transport::new(transport_config);
-
+    // Start the integrated LSP server
     info!("Server starting...");
+    start_server(transport_config).await?;
 
-    // TODO: Create and start the actual LSP server
-    // This will be implemented in the user story phases
-    // For now, just log that we're ready
-    info!("Server ready and listening for connections");
-
-    // Keep the main thread alive
-    tokio::signal::ctrl_c().await?;
-    info!("Received shutdown signal, stopping server...");
-
+    info!("Kaiak server stopped");
     Ok(())
 }
 
@@ -214,5 +204,4 @@ async fn version_command() -> Result<()> {
     Ok(())
 }
 
-/// Add required dependencies to Cargo.toml for version info
-// This is a placeholder - we'll need to add rustc_version and toml dependencies
+// Note: rustc_version and toml dependencies are already added to Cargo.toml

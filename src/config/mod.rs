@@ -1,5 +1,4 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt, EnvFilter};
-use tracing::Level;
 
 pub mod settings;
 

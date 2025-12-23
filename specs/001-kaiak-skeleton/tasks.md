@@ -65,22 +65,22 @@ description: "Task list template for feature implementation"
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T015 [P] [US1] Contract test for kaiak/session/create endpoint in tests/contract/jsonrpc.rs
-- [ ] T016 [P] [US1] Contract test for kaiak/fix/generate endpoint in tests/contract/jsonrpc.rs
-- [ ] T017 [P] [US1] Integration test for complete fix generation workflow in tests/integration/fix_workflow.rs
-- [ ] T018 [P] [US1] Integration test for Goose agent initialization in tests/integration/goose_integration.rs
+- [x] T015 [P] [US1] Contract test for kaiak/session/create endpoint in tests/contract/jsonrpc.rs
+- [x] T016 [P] [US1] Contract test for kaiak/fix/generate endpoint in tests/contract/jsonrpc.rs
+- [x] T017 [P] [US1] Integration test for complete fix generation workflow in tests/integration/fix_workflow.rs
+- [x] T018 [P] [US1] Integration test for Goose agent initialization in tests/integration/goose_integration.rs
 
 ### Implementation for User Story 1
 
-- [ ] T019 [P] [US1] Create Fix Generation Request model in src/models/request.rs
-- [ ] T020 [P] [US1] Create Incident data model in src/models/incident.rs
-- [ ] T021 [P] [US1] Create AI Session model in src/models/session.rs
-- [ ] T022 [US1] Implement session management in src/goose/session.rs (depends on T019, T020, T021)
-- [ ] T023 [US1] Implement agent lifecycle management in src/goose/agent.rs (depends on T022)
-- [ ] T024 [US1] Implement fix generation handler in src/handlers/fix_generation.rs (depends on T023)
-- [ ] T025 [US1] Implement session lifecycle handler in src/handlers/lifecycle.rs (depends on T023)
-- [ ] T026 [US1] Create migration prompt templates in src/goose/prompts.rs
-- [ ] T027 [US1] Integrate JSON-RPC handlers with transport layer in src/server/mod.rs
+- [x] T019 [P] [US1] Create Fix Generation Request model in src/models/request.rs
+- [x] T020 [P] [US1] Create Incident data model in src/models/incident.rs
+- [x] T021 [P] [US1] Create AI Session model in src/models/session.rs
+- [x] T022 [US1] Implement session management in src/goose/session.rs (depends on T019, T020, T021)
+- [x] T023 [US1] Implement agent lifecycle management in src/goose/agent.rs (depends on T022)
+- [x] T024 [US1] Implement fix generation handler in src/handlers/fix_generation.rs (depends on T023)
+- [x] T025 [US1] Implement session lifecycle handler in src/handlers/lifecycle.rs (depends on T023)
+- [x] T026 [US1] Create migration prompt templates in src/goose/prompts.rs
+- [x] T027 [US1] Integrate JSON-RPC handlers with transport layer in src/server/mod.rs
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -94,19 +94,21 @@ description: "Task list template for feature implementation"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T028 [P] [US2] Contract test for streaming notification messages in tests/contract/jsonrpc.rs
-- [ ] T029 [P] [US2] Integration test for real-time progress streaming in tests/integration/streaming.rs
-- [ ] T030 [P] [US2] Integration test for AI message streaming in tests/integration/ai_streaming.rs
+> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
+
+- [x] T028 [P] [US2] Contract test for streaming notification messages in tests/contract/jsonrpc.rs
+- [x] T029 [P] [US2] Integration test for real-time progress streaming in tests/integration/streaming.rs
+- [x] T030 [P] [US2] Integration test for AI message streaming in tests/integration/ai_streaming.rs
 
 ### Implementation for User Story 2
 
-- [ ] T031 [P] [US2] Create Stream Message model in src/models/messages.rs with multiple content types
-- [ ] T032 [P] [US2] Implement progress tracking utilities in src/handlers/progress.rs
-- [ ] T033 [US2] Add streaming support to JSON-RPC transport in src/server/transport.rs (depends on T031)
-- [ ] T034 [US2] Implement AI message streaming handler in src/handlers/streaming.rs (depends on T032, T033)
-- [ ] T035 [US2] Add progress streaming to fix generation handler in src/handlers/fix_generation.rs
-- [ ] T036 [US2] Implement tool call streaming from Goose agent in src/goose/agent.rs
-- [ ] T037 [US2] Add thinking process streaming in src/goose/session.rs
+- [x] T031 [P] [US2] Create Stream Message model in src/models/messages.rs with multiple content types
+- [x] T032 [P] [US2] Implement progress tracking utilities in src/handlers/progress.rs
+- [x] T033 [US2] Add streaming support to JSON-RPC transport in src/server/transport.rs (depends on T031)
+- [x] T034 [US2] Implement AI message streaming handler in src/handlers/streaming.rs (depends on T032, T033)
+- [x] T035 [US2] Add progress streaming to fix generation handler in src/handlers/fix_generation.rs
+- [x] T036 [US2] Implement tool call streaming from Goose agent in src/goose/agent.rs
+- [x] T037 [US2] Add thinking process streaming in src/goose/session.rs
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 

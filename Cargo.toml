@@ -11,7 +11,7 @@ keywords = ["ai", "migration", "lsp", "goose", "code-assistant"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
-goose = { git = "https://github.com/block/goose.git", features = ["full"] }
+goose = { git = "https://github.com/block/goose.git" }
 tower-lsp = "0.20"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -20,13 +20,14 @@ anyhow = "1.0"
 thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.0", features = ["derive", "env"] }
 futures = "0.3"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 toml = "0.8"
 rustc_version = "0.4"
+async-trait = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"

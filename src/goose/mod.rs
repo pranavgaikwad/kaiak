@@ -100,7 +100,7 @@ mod tests {
     #[tokio::test]
     async fn test_session_count() {
         let manager = GooseManager::new();
-        let session = AiSession::new(
+        let _session = AiSession::new(
             "/tmp/test".to_string(),
             Some("test".to_string()),
         );

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use super::{Id, Timestamp, Status, Metadata};
+use super::{Id, Timestamp, Metadata};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiSession {

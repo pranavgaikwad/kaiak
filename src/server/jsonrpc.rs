@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
-use tower_lsp::lsp_types::*;
-use tower_lsp::{LanguageServer, LspService, Server};
+use tower_lsp::jsonrpc::{Error, ErrorCode};
 
 /// Custom JSON-RPC error codes for Kaiak-specific operations
 pub mod error_codes {
@@ -45,8 +43,8 @@ pub mod methods {
 /// Helper functions for creating JSON-RPC errors
 pub fn create_error(code: i32, message: &str, data: Option<Value>) -> Error {
     Error {
-        code: ErrorCode::ServerError(code),
-        message: message.into(),
+        code: ErrorCode::ServerError(code.into()),
+        message: message.to_string().into(),
         data,
     }
 }
@@ -137,7 +135,7 @@ mod tests {
     fn test_session_not_found_error() {
         let error = session_not_found_error("test-session");
         if let ErrorCode::ServerError(code) = error.code {
-            assert_eq!(code, error_codes::SESSION_NOT_FOUND);
+            assert_eq!(code, error_codes::SESSION_NOT_FOUND as i64);
         }
     }
 }

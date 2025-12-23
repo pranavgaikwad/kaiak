@@ -1,8 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tower_lsp::jsonrpc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransportConfig {
@@ -26,74 +24,46 @@ impl Transport {
     }
 
     /// Initialize the transport layer based on configuration
-    pub async fn start<T>(&self, server: T) -> Result<()>
-    where
-        T: tower_lsp::LanguageServer + Send + Sync + 'static,
-    {
+    /// Note: This is a placeholder implementation for the foundational phase
+    /// Full LSP server integration will be completed in T027
+    pub async fn start(&self) -> Result<()> {
         match &self.config {
             TransportConfig::Stdio => {
-                info!("Starting server with stdio transport");
-                self.start_stdio(server).await
+                info!("Starting server with stdio transport (placeholder)");
+                self.start_stdio().await
             }
             TransportConfig::UnixSocket { path } => {
-                info!("Starting server with Unix socket: {}", path);
-                self.start_unix_socket(server, path).await
+                info!("Starting server with Unix socket: {} (placeholder)", path);
+                self.start_unix_socket(path).await
             }
         }
     }
 
-    async fn start_stdio<T>(&self, server: T) -> Result<()>
-    where
-        T: tower_lsp::LanguageServer + Send + Sync + 'static,
-    {
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
+    async fn start_stdio(&self) -> Result<()> {
+        debug!("Initializing stdio transport (placeholder)");
 
-        debug!("Initializing LSP server with stdio transport");
-        tower_lsp::Server::new(stdin, stdout, server)
-            .serve()
-            .await;
-
+        // TODO: Implement actual LSP server integration in T027
+        // This is a placeholder that logs the intention
+        info!("Stdio transport ready for LSP server integration");
         Ok(())
     }
 
     #[cfg(unix)]
-    async fn start_unix_socket<T>(&self, server: T, path: &str) -> Result<()>
-    where
-        T: tower_lsp::LanguageServer + Send + Sync + 'static,
-    {
-        use tokio::net::{UnixListener, UnixStream};
+    async fn start_unix_socket(&self, path: &str) -> Result<()> {
+        use tokio::net::UnixListener;
 
         // Remove existing socket file if it exists
         let _ = std::fs::remove_file(path);
 
-        let listener = UnixListener::bind(path)?;
-        info!("Unix socket server listening on: {}", path);
+        let _listener = UnixListener::bind(path)?;
+        info!("Unix socket transport ready at: {} (placeholder)", path);
 
-        while let Ok((stream, _)) = listener.accept().await {
-            debug!("New client connected");
-            let (read, write) = stream.into_split();
-
-            // Clone server for this connection
-            let server_clone = server.clone();
-
-            tokio::spawn(async move {
-                if let Err(e) = tower_lsp::Server::new(read, write, server_clone)
-                    .serve()
-                    .await {
-                    error!("Client connection error: {}", e);
-                }
-            });
-        }
-
+        // TODO: Implement actual LSP server integration in T027
         Ok(())
     }
 
     #[cfg(not(unix))]
-    async fn start_unix_socket<T>(&self, _server: T, _path: &str) -> Result<()>
-    where
-        T: tower_lsp::LanguageServer + Send + Sync + 'static,
-    {
+    async fn start_unix_socket(&self, _path: &str) -> Result<()> {
         anyhow::bail!("Unix sockets are not supported on this platform");
     }
 }
