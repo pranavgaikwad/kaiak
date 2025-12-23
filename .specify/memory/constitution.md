@@ -85,4 +85,6 @@ Constitution supersedes all other development practices and team agreements. Ame
 
 Development teams MUST reference this constitution during planning, implementation, and review phases. Project architectural decisions MUST be evaluated against these principles. Any deviation from constitutional requirements MUST be documented with rationale and remediation timeline.
 
-**Version**: 1.0.0 | **Ratified**: 2025-12-22 | **Last Amended**: 2025-12-22
+For additional background and detailed context regarding this project, refer to [./context.md](./context.md).
+
+**Version**: 1.0.1 | **Ratified**: 2025-12-23 | **Last Amended**: 2025-12-22

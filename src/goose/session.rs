@@ -146,8 +146,16 @@ impl GooseSessionWrapper {
         info!("Creating Goose session wrapper for: {}", ai_session.id);
 
         let config = SessionConfiguration {
-            provider: ai_session.configuration.provider.clone(),
-            model: ai_session.configuration.model.clone(),
+            provider: ai_session.configuration.provider_config
+                .as_ref()
+                .and_then(|p| p.get("provider").or_else(|| p.get("_type")))
+                .and_then(|p| p.as_str())
+                .map(|s| s.to_string()),
+            model: ai_session.configuration.provider_config
+                .as_ref()
+                .and_then(|p| p.get("model"))
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string()),
             timeout: ai_session.configuration.timeout.unwrap_or(300),
             max_turns: ai_session.configuration.max_turns.unwrap_or(50),
         };

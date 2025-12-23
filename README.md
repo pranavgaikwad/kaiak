@@ -1,5 +1,14 @@
 # Kaiak
 
+```
+                _______________________
+         ______/_______________________\______
+    ____/_______/____  K A I A K  _____\_______\____
+    \____\_______\_____________________/_______/____/
+         \________\___________________/________/
+
+```
+
 [![CI](https://github.com/pranavgaikwad/kaiak/workflows/CI/badge.svg)](https://github.com/pranavgaikwad/kaiak/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
@@ -154,8 +163,8 @@ log_level = "info"
 max_concurrent_sessions = 10
 
 [ai]
-provider = "openai"  # or "anthropic"
-model = "gpt-4"
+# Provider configuration is passed as arbitrary JSON to Goose
+# Set via environment variables or session creation parameters
 timeout = 300
 max_turns = 50
 
@@ -264,8 +273,7 @@ src/
 ├── goose/               # Goose agent integration
 │   ├── agent.rs         # Agent lifecycle management
 │   ├── session.rs       # Session state management
-│   ├── monitoring.rs    # Performance monitoring
-│   └── resources.rs     # Resource management
+│   └── monitoring.rs    # Performance monitoring
 ├── models/              # Data models and entities
 │   ├── session.rs       # Session models
 │   ├── request.rs       # Fix generation requests

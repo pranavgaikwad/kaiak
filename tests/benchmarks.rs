@@ -98,8 +98,10 @@ pub async fn benchmark_session_creation(config: &BenchmarkConfig) -> Result<Benc
                 configuration: SessionConfiguration {
                     workspace_path: format!("/tmp/test-workspace-{}", i),
                     session_name: Some(format!("benchmark-session-{}", i)),
-                    provider: Some("openai".to_string()),
-                    model: Some("gpt-4".to_string()),
+                    provider_config: Some(serde_json::json!({
+                        "provider": "openai",
+                        "model": "gpt-4"
+                    })),
                     timeout: Some(300),
                     max_turns: Some(50),
                     custom: std::collections::HashMap::new(),
@@ -205,8 +207,10 @@ async fn test_concurrent_sessions_limit() {
         configuration: SessionConfiguration {
             workspace_path: "/tmp/test-1".to_string(),
             session_name: Some("test-session-1".to_string()),
-            provider: Some("openai".to_string()),
-            model: Some("gpt-4".to_string()),
+            provider_config: Some(serde_json::json!({
+                "provider": "openai",
+                "model": "gpt-4"
+            })),
             timeout: Some(300),
             max_turns: Some(50),
             custom: std::collections::HashMap::new(),
@@ -231,8 +235,10 @@ async fn test_concurrent_sessions_limit() {
         configuration: SessionConfiguration {
             workspace_path: "/tmp/test-2".to_string(),
             session_name: Some("test-session-2".to_string()),
-            provider: Some("openai".to_string()),
-            model: Some("gpt-4".to_string()),
+            provider_config: Some(serde_json::json!({
+                "provider": "openai",
+                "model": "gpt-4"
+            })),
             timeout: Some(300),
             max_turns: Some(50),
             custom: std::collections::HashMap::new(),
@@ -257,8 +263,10 @@ async fn test_concurrent_sessions_limit() {
         configuration: SessionConfiguration {
             workspace_path: "/tmp/test-3".to_string(),
             session_name: Some("test-session-3".to_string()),
-            provider: Some("openai".to_string()),
-            model: Some("gpt-4".to_string()),
+            provider_config: Some(serde_json::json!({
+                "provider": "openai",
+                "model": "gpt-4"
+            })),
             timeout: Some(300),
             max_turns: Some(50),
             custom: std::collections::HashMap::new(),
@@ -291,8 +299,10 @@ async fn test_session_cache_performance() {
         configuration: SessionConfiguration {
             workspace_path: "/tmp/cache-test".to_string(),
             session_name: Some("cache-test-session".to_string()),
-            provider: Some("openai".to_string()),
-            model: Some("gpt-4".to_string()),
+            provider_config: Some(serde_json::json!({
+                "provider": "openai",
+                "model": "gpt-4"
+            })),
             timeout: Some(300),
             max_turns: Some(50),
             custom: std::collections::HashMap::new(),

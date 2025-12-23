@@ -1,48 +1,41 @@
 use anyhow::Result;
 use std::sync::Arc;
 use crate::models::{AiSession, SessionStatus, Session, Id};
-use crate::goose::{AgentManager, SessionMonitor, ResourceManager};
+use crate::goose::{AgentManager, SessionMonitor};
 use crate::{KaiakError, KaiakResult};
 use tracing::{info, error, debug, warn};
 use chrono::Utc;
 use std::time::Duration;
 use tokio::time::timeout;
 
-/// Handler for session lifecycle operations with monitoring and resource management
+/// Handler for session lifecycle operations with monitoring
 #[derive(Clone)]
 pub struct LifecycleHandler {
     agent_manager: Arc<AgentManager>,
     session_monitor: Arc<SessionMonitor>,
-    resource_manager: Arc<ResourceManager>,
 }
 
 impl LifecycleHandler {
     pub async fn new() -> Result<Self> {
         let agent_manager = Arc::new(AgentManager::new().await?);
         let session_monitor = Arc::new(SessionMonitor::new());
-        let resource_manager = Arc::new(ResourceManager::new());
         Ok(Self {
             agent_manager,
             session_monitor,
-            resource_manager,
         })
     }
 
-    /// Create a new lifecycle handler with full monitoring and resource management
+    /// Create a new lifecycle handler with monitoring
     pub async fn with_monitoring() -> KaiakResult<Self> {
         let agent_manager = Arc::new(AgentManager::new().await
             .map_err(|e| KaiakError::Internal(e.to_string()))?);
         let session_monitor = Arc::new(SessionMonitor::new());
-        let resource_manager = Arc::new(ResourceManager::new());
 
-        // Start monitoring and resource management
         session_monitor.start().await?;
-        resource_manager.start().await?;
 
         Ok(Self {
             agent_manager,
             session_monitor,
-            resource_manager,
         })
     }
 
@@ -50,12 +43,10 @@ impl LifecycleHandler {
     pub fn new_with_components(
         agent_manager: Arc<AgentManager>,
         session_monitor: Arc<SessionMonitor>,
-        resource_manager: Arc<ResourceManager>,
     ) -> Self {
         Self {
             agent_manager,
             session_monitor,
-            resource_manager,
         }
     }
 
@@ -65,12 +56,6 @@ impl LifecycleHandler {
     pub async fn create_session(&self, session: Session) -> KaiakResult<()> {
         info!("Creating session: {}", session.id);
 
-        // Register with resource manager if available
-        if let Ok(resource_manager) = &Arc::try_unwrap(self.resource_manager.clone()) {
-            // Can't unwrap Arc, so just proceed
-        }
-
-        // Register with session monitor if available
         if let Ok(monitor) = &Arc::try_unwrap(self.session_monitor.clone()) {
             // Can't unwrap Arc, so just proceed
         }
@@ -95,7 +80,7 @@ impl LifecycleHandler {
             // 2. Stop any active processing
             self.cancel_active_requests(session_id).await?;
 
-            // 3. Cleanup resources
+            // 3. Cleanup session data
             self.cleanup_session_resources(session_id).await?;
 
             // 4. Remove from monitoring
@@ -103,12 +88,7 @@ impl LifecycleHandler {
                 // Would unregister from monitor
             }
 
-            // 5. Deallocate from resource manager
-            if let Ok(resource_manager) = &Arc::try_unwrap(self.resource_manager.clone()) {
-                // Would deallocate resources
-            }
-
-            // 6. Remove from agent manager
+            // 5. Remove from agent manager
             self.remove_from_agent_manager(session_id).await?;
 
             Ok(())
@@ -248,7 +228,7 @@ impl LifecycleHandler {
         // Force stop all operations
         let _ = self.cancel_active_requests(session_id).await;
 
-        // Force cleanup resources
+        // Force cleanup session data
         let _ = self.cleanup_session_resources(session_id).await;
 
         // Force remove from all managers
@@ -329,10 +309,6 @@ impl LifecycleHandler {
             // Would update monitor
         }
 
-        // Update in resource manager
-        if let Ok(resource_manager) = &Arc::try_unwrap(self.resource_manager.clone()) {
-            // Would update resource manager
-        }
 
         Ok(())
     }
@@ -344,8 +320,8 @@ impl LifecycleHandler {
     }
 
     async fn cleanup_session_resources(&self, session_id: &Id) -> KaiakResult<()> {
-        debug!("Cleaning up resources for session: {}", session_id);
-        // This would cleanup temporary files, memory allocations, etc.
+        debug!("Cleaning up session data for session: {}", session_id);
+        // This would cleanup temporary files, session state, etc.
         Ok(())
     }
 
@@ -365,8 +341,4 @@ impl LifecycleHandler {
         &self.session_monitor
     }
 
-    /// Get access to the resource manager
-    pub fn resource_manager(&self) -> &Arc<ResourceManager> {
-        &self.resource_manager
-    }
 }

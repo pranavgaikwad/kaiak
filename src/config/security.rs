@@ -1,16 +1,27 @@
-//! Security hardening for enterprise deployment
-
 use anyhow::Result;
 use std::path::Path;
 use std::fs::Permissions;
 use std::os::unix::fs::PermissionsExt;
-use tracing::{info, warn, error};
+use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
+use tracing::{info, warn};
 
-/// Security configuration and hardening for enterprise deployment
+/// Permission level for tool execution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionLevel {
+    /// Execute tool automatically without user approval
+    AutoApprove,
+    /// Ask user for approval before execution
+    AskBefore,
+    /// Deny tool execution entirely
+    Deny,
+}
+
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
-    /// Whether to require approval for all file modifications
-    pub require_approval: bool,
+    /// Tool-specific permission settings
+    pub tool_permissions: HashMap<String, PermissionLevel>,
     /// Timeout for approval requests in seconds
     pub approval_timeout: u32,
     /// Maximum file size for processing (bytes)
@@ -25,10 +36,6 @@ pub struct SecurityConfig {
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceValidationConfig {
-    /// Whether to validate workspace paths are within allowed directories
-    pub validate_workspace_paths: bool,
-    /// List of allowed workspace root directories
-    pub allowed_workspace_roots: Vec<String>,
     /// Whether to follow symbolic links
     pub follow_symlinks: bool,
     /// Maximum workspace depth for traversal
@@ -37,8 +44,21 @@ pub struct WorkspaceValidationConfig {
 
 impl Default for SecurityConfig {
     fn default() -> Self {
+        let mut tool_permissions = HashMap::new();
+
+        tool_permissions.insert("writeFile".to_string(), PermissionLevel::AskBefore);
+        tool_permissions.insert("createFile".to_string(), PermissionLevel::AskBefore);
+        tool_permissions.insert("deleteFile".to_string(), PermissionLevel::AskBefore);
+        tool_permissions.insert("editFile".to_string(), PermissionLevel::AskBefore);
+        tool_permissions.insert("moveFile".to_string(), PermissionLevel::AskBefore);
+        tool_permissions.insert("renameFile".to_string(), PermissionLevel::AskBefore);
+
+        tool_permissions.insert("readFile".to_string(), PermissionLevel::AutoApprove);
+        tool_permissions.insert("listFiles".to_string(), PermissionLevel::AutoApprove);
+        tool_permissions.insert("searchFiles".to_string(), PermissionLevel::AutoApprove);
+
         Self {
-            require_approval: true,
+            tool_permissions,
             approval_timeout: 300, // 5 minutes
             max_file_size: 10 * 1024 * 1024, // 10MB
             excluded_patterns: vec![
@@ -60,13 +80,6 @@ impl Default for SecurityConfig {
             ],
             socket_permissions: 0o600, // Read/write for owner only
             workspace_validation: WorkspaceValidationConfig {
-                validate_workspace_paths: true,
-                allowed_workspace_roots: vec![
-                    "/home".to_string(),
-                    "/Users".to_string(),
-                    "/opt/workspaces".to_string(),
-                    "/workspace".to_string(),
-                ],
                 follow_symlinks: false,
                 max_workspace_depth: 20,
             },
@@ -75,32 +88,15 @@ impl Default for SecurityConfig {
 }
 
 impl SecurityConfig {
-    /// Validate that a workspace path is allowed according to security policy
+    /// Validate that a workspace path is accessible
     pub fn validate_workspace_path<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let path = path.as_ref();
-
-        if !self.workspace_validation.validate_workspace_paths {
-            return Ok(());
-        }
 
         // Convert to canonical path
         let canonical_path = path.canonicalize()
             .map_err(|e| anyhow::anyhow!("Failed to resolve workspace path: {}", e))?;
 
-        // Check if path is within allowed roots
         let path_str = canonical_path.to_string_lossy();
-        let is_allowed = self.workspace_validation.allowed_workspace_roots
-            .iter()
-            .any(|root| path_str.starts_with(root));
-
-        if !is_allowed {
-            return Err(anyhow::anyhow!(
-                "Workspace path '{}' is not within allowed directories: {:?}",
-                path_str,
-                self.workspace_validation.allowed_workspace_roots
-            ));
-        }
-
         info!("Workspace path validation passed: {}", path_str);
         Ok(())
     }
@@ -220,6 +216,28 @@ impl SecurityConfig {
         Ok(())
     }
 
+    /// Get permission level for a tool
+    pub fn get_tool_permission(&self, tool_name: &str) -> PermissionLevel {
+        self.tool_permissions.get(tool_name)
+            .cloned()
+            .unwrap_or(PermissionLevel::AutoApprove)
+    }
+
+    /// Check if a tool requires approval
+    pub fn tool_requires_approval(&self, tool_name: &str) -> bool {
+        matches!(self.get_tool_permission(tool_name), PermissionLevel::AskBefore)
+    }
+
+    /// Check if a tool is denied
+    pub fn is_tool_denied(&self, tool_name: &str) -> bool {
+        matches!(self.get_tool_permission(tool_name), PermissionLevel::Deny)
+    }
+
+    /// Set permission level for a tool
+    pub fn set_tool_permission(&mut self, tool_name: String, permission: PermissionLevel) {
+        self.tool_permissions.insert(tool_name, permission);
+    }
+
     /// Check for potentially dangerous file operations
     pub fn validate_file_operation(&self, operation: &str, file_path: &str) -> Result<()> {
         // Check for sensitive file patterns
@@ -230,29 +248,38 @@ impl SecurityConfig {
             ));
         }
 
-        // Validate operation type
-        match operation.to_lowercase().as_str() {
-            "read" | "write" | "edit" | "create" => Ok(()),
-            "delete" | "move" | "rename" => {
-                if !self.require_approval {
-                    return Err(anyhow::anyhow!(
-                        "Destructive operation '{}' requires approval to be enabled",
-                        operation
-                    ));
-                }
-                Ok(())
-            }
+        // Map operation to tool name and check permission
+        let tool_name = match operation.to_lowercase().as_str() {
+            "read" => "readFile",
+            "write" => "writeFile",
+            "edit" => "editFile",
+            "create" => "createFile",
+            "delete" => "deleteFile",
+            "move" => "moveFile",
+            "rename" => "renameFile",
             "execute" | "run" | "exec" => {
-                Err(anyhow::anyhow!(
+                return Err(anyhow::anyhow!(
                     "Code execution operation '{}' is not allowed",
                     operation
-                ))
+                ));
             }
-            _ => Err(anyhow::anyhow!(
-                "Unknown file operation: {}",
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unknown file operation: {}",
+                    operation
+                ));
+            }
+        };
+
+        // Check if tool is denied
+        if self.is_tool_denied(tool_name) {
+            return Err(anyhow::anyhow!(
+                "Operation '{}' is denied by security policy",
                 operation
-            )),
+            ));
         }
+
+        Ok(())
     }
 }
 
@@ -324,11 +351,9 @@ mod tests {
     fn test_file_operation_validation() {
         let config = SecurityConfig::default();
 
-        // Safe operations
+        // Safe operations (auto-approved by default)
         assert!(config.validate_file_operation("read", "src/main.rs").is_ok());
         assert!(config.validate_file_operation("write", "src/main.rs").is_ok());
-
-        // Destructive operations (require approval enabled)
         assert!(config.validate_file_operation("delete", "src/main.rs").is_ok());
 
         // Forbidden operations
@@ -336,5 +361,28 @@ mod tests {
 
         // Excluded files
         assert!(config.validate_file_operation("read", ".env").is_err());
+    }
+
+    #[test]
+    fn test_tool_permissions() {
+        let config = SecurityConfig::default();
+
+        // File modification tools should require approval by default
+        assert!(config.tool_requires_approval("writeFile"));
+        assert!(config.tool_requires_approval("createFile"));
+        assert!(config.tool_requires_approval("deleteFile"));
+
+        // File reading tools should be auto-approved by default
+        assert!(!config.tool_requires_approval("readFile"));
+        assert!(!config.tool_requires_approval("listFiles"));
+
+        // Unknown tools should be auto-approved by default
+        assert!(!config.tool_requires_approval("unknownTool"));
+
+        // Test setting custom permissions
+        let mut config = SecurityConfig::default();
+        config.set_tool_permission("readFile".to_string(), PermissionLevel::Deny);
+        assert!(config.is_tool_denied("readFile"));
+        assert!(!config.tool_requires_approval("readFile"));
     }
 }

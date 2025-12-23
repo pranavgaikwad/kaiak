@@ -19,7 +19,7 @@ Content-Length: {byte_length}\r\n
 
 #### `kaiak/session/create`
 
-Create a new AI session for fix generation.
+Create a new AI session for fix generation. The `provider_config` field accepts arbitrary provider settings in LangChain format, which are passed directly to the Goose agent without validation.
 
 **Request**:
 ```json
@@ -29,12 +29,14 @@ Create a new AI session for fix generation.
   "params": {
     "workspace_path": "/absolute/path/to/workspace",
     "session_name": "migration-session-1",
-    "configuration": {
-      "provider": "openai",
+    "provider_config": {
+      "_type": "openai",
       "model": "gpt-4",
-      "timeout": 300,
-      "max_turns": 50
-    }
+      "api_key": "sk-...",
+      "base_url": "https://api.openai.com/v1"
+    },
+    "timeout": 300,
+    "max_turns": 50
   },
   "id": 1
 }

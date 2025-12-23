@@ -21,23 +21,8 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
-    pub provider: String,
-    pub model: String,
     pub timeout: u32,
     pub max_turns: u32,
-    pub providers: ProviderConfigs,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfigs {
-    pub openai: ProviderConfig,
-    pub anthropic: ProviderConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,20 +53,8 @@ impl Default for Settings {
                 max_concurrent_sessions: 10,
             },
             ai: AiConfig {
-                provider: "openai".to_string(),
-                model: "gpt-4".to_string(),
                 timeout: 300,
                 max_turns: 50,
-                providers: ProviderConfigs {
-                    openai: ProviderConfig {
-                        api_key: std::env::var("OPENAI_API_KEY").ok(),
-                        base_url: Some("https://api.openai.com/v1".to_string()),
-                    },
-                    anthropic: ProviderConfig {
-                        api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
-                        base_url: None,
-                    },
-                },
             },
             workspace: WorkspaceConfig {
                 exclude_patterns: vec![
@@ -108,7 +81,6 @@ impl Settings {
     pub fn load() -> Result<Self> {
         let mut settings = Self::default();
 
-        // Override with environment variables
         if let Ok(val) = std::env::var("KAIAK_LOG_LEVEL") {
             settings.server.log_level = val;
         }
@@ -123,14 +95,6 @@ impl Settings {
 
         if let Ok(val) = std::env::var("KAIAK_MAX_SESSIONS") {
             settings.server.max_concurrent_sessions = val.parse().unwrap_or(10);
-        }
-
-        if let Ok(val) = std::env::var("KAIAK_AI_PROVIDER") {
-            settings.ai.provider = val;
-        }
-
-        if let Ok(val) = std::env::var("KAIAK_AI_MODEL") {
-            settings.ai.model = val;
         }
 
         Ok(settings)
@@ -148,11 +112,6 @@ impl Settings {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.ai.providers.openai.api_key.is_none()
-            && self.ai.providers.anthropic.api_key.is_none() {
-            anyhow::bail!("At least one AI provider API key must be configured");
-        }
-
         if self.server.max_concurrent_sessions == 0 {
             anyhow::bail!("Max concurrent sessions must be greater than 0");
         }

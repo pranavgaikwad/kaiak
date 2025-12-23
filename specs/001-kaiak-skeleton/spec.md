@@ -57,16 +57,16 @@ A developer receives AI-generated fix suggestions that require file modification
 
 ### User Story 4 - Agent Lifecycle Management (Priority: P4)
 
-A developer needs the ability to start, monitor, pause, resume, and stop fix generation sessions. The system must handle agent initialization, resource management, and cleanup to ensure stable operation across multiple requests.
+A developer needs the ability to start, monitor, pause, resume, and stop fix generation sessions. The system must handle agent initialization and session cleanup to ensure stable operation across multiple requests.
 
 **Why this priority**: Proper lifecycle management is important for production stability but can be implemented after core functionality is proven.
 
-**Independent Test**: Can be tested by issuing lifecycle commands (start, stop, restart) and verifying that the agent responds appropriately and resources are managed correctly.
+**Independent Test**: Can be tested by issuing lifecycle commands (start, stop, restart) and verifying that the agent responds appropriately and sessions are cleaned up properly.
 
 **Acceptance Scenarios**:
 
 1. **Given** no active sessions exist, **When** a fix generation request is received, **Then** a new Goose agent session is created and initialized
-2. **Given** an active agent session exists, **When** the user requests session termination, **Then** the agent is properly shut down and resources are cleaned up
+2. **Given** an active agent session exists, **When** the user requests session termination, **Then** the agent is properly shut down and session state is cleaned up
 3. **Given** an agent session encounters errors, **When** failure is detected, **Then** automatic recovery or graceful degradation is initiated
 
 ---

@@ -32,8 +32,8 @@ pub enum SessionStatus {
 pub struct SessionConfiguration {
     pub workspace_path: String,
     pub session_name: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
+    /// Arbitrary provider configuration passed from IDE (LangChain format)
+    pub provider_config: Option<serde_json::Value>,
     pub timeout: Option<u32>,
     pub max_turns: Option<u32>,
     #[serde(default)]
@@ -52,8 +52,34 @@ impl AiSession {
             configuration: SessionConfiguration {
                 workspace_path,
                 session_name,
-                provider: None,
-                model: None,
+                provider_config: None,
+                timeout: None,
+                max_turns: None,
+                custom: Metadata::new(),
+            },
+            active_request_id: None,
+            message_count: 0,
+            error_count: 0,
+            metadata: Metadata::new(),
+        }
+    }
+
+    pub fn new_with_provider_config(
+        workspace_path: String,
+        session_name: Option<String>,
+        provider_config: serde_json::Value,
+    ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            goose_session_id: None,
+            status: SessionStatus::Created,
+            created_at: now.clone(),
+            updated_at: now,
+            configuration: SessionConfiguration {
+                workspace_path,
+                session_name,
+                provider_config: Some(provider_config),
                 timeout: None,
                 max_turns: None,
                 custom: Metadata::new(),
@@ -112,8 +138,7 @@ impl Session {
             configuration: SessionConfiguration {
                 workspace_path,
                 session_name,
-                provider: None,
-                model: None,
+                provider_config: None,
                 timeout: None,
                 max_turns: None,
                 custom: Metadata::new(),

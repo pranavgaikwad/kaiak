@@ -93,8 +93,7 @@ impl KaiakServer {
             configuration: crate::models::session::SessionConfiguration {
                 workspace_path: params.workspace_path.clone(),
                 session_name: params.session_name.clone(),
-                provider: None,
-                model: None,
+                provider_config: params.configuration.clone(),
                 timeout: None,
                 max_turns: None,
                 custom: Default::default(),

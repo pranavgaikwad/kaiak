@@ -111,27 +111,6 @@ impl ConfigurationValidator {
     }
 
     fn validate_ai_config(&mut self, ai_config: &crate::config::settings::AiConfig) {
-        // Validate provider
-        match ai_config.provider.as_str() {
-            "openai" | "anthropic" => {},
-            other => {
-                self.warnings.push(format!("Untested AI provider: {}. Supported: openai, anthropic", other));
-            }
-        }
-
-        // Validate model
-        let known_models = [
-            "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo",
-            "claude-3-opus", "claude-3-sonnet", "claude-3-haiku"
-        ];
-
-        if !known_models.contains(&ai_config.model.as_str()) {
-            self.warnings.push(format!(
-                "Unknown model: {}. Ensure it's supported by the provider",
-                ai_config.model
-            ));
-        }
-
         // Validate timeout
         if ai_config.timeout < 30 {
             self.warnings.push("AI timeout is very short (< 30s). May cause premature failures".to_string());
@@ -145,49 +124,8 @@ impl ConfigurationValidator {
         } else if ai_config.max_turns > 100 {
             self.warnings.push("max_turns is very high (> 100). May cause excessive API usage".to_string());
         }
-
-        // Validate API keys
-        self.validate_provider_config(&ai_config.providers.openai, "openai");
-        self.validate_provider_config(&ai_config.providers.anthropic, "anthropic");
-
-        // Ensure at least one provider has an API key
-        let has_openai = ai_config.providers.openai.api_key.is_some();
-        let has_anthropic = ai_config.providers.anthropic.api_key.is_some();
-
-        if !has_openai && !has_anthropic {
-            self.errors.push("At least one AI provider must have an API key configured".to_string());
-        }
     }
 
-    fn validate_provider_config(&mut self, provider: &crate::config::settings::ProviderConfig, name: &str) {
-        if let Some(api_key) = &provider.api_key {
-            if api_key.is_empty() {
-                self.errors.push(format!("{} API key is empty", name));
-            } else {
-                // Basic format validation
-                match name {
-                    "openai" => {
-                        if !api_key.starts_with("sk-") && !api_key.starts_with("sk-proj-") {
-                            self.warnings.push("OpenAI API key format may be invalid (should start with 'sk-')".to_string());
-                        }
-                    }
-                    "anthropic" => {
-                        if !api_key.starts_with("sk-ant-") {
-                            self.warnings.push("Anthropic API key format may be invalid (should start with 'sk-ant-')".to_string());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // Validate base URL if provided
-        if let Some(base_url) = &provider.base_url {
-            if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-                self.errors.push(format!("{} base_url must be a valid HTTP/HTTPS URL", name));
-            }
-        }
-    }
 
     fn validate_workspace_config(&mut self, workspace_config: &crate::config::settings::WorkspaceConfig) {
         // Validate exclude patterns
@@ -332,20 +270,8 @@ mod tests {
                 max_concurrent_sessions: 10,
             },
             ai: AiConfig {
-                provider: "openai".to_string(),
-                model: "gpt-4".to_string(),
                 timeout: 300,
                 max_turns: 50,
-                providers: ProviderConfigs {
-                    openai: ProviderConfig {
-                        api_key: Some("sk-test1234567890".to_string()),
-                        base_url: Some("https://api.openai.com/v1".to_string()),
-                    },
-                    anthropic: ProviderConfig {
-                        api_key: None,
-                        base_url: None,
-                    },
-                },
             },
             workspace: WorkspaceConfig {
                 exclude_patterns: vec!["target/".to_string(), ".git/".to_string()],
@@ -385,8 +311,11 @@ mod tests {
 
     #[test]
     fn test_missing_api_key() {
-        let mut settings = create_test_settings();
-        settings.ai.providers.openai.api_key = None;
+        let settings = create_test_settings();
+
+        // Temporarily remove API key environment variables to test validation
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("ANTHROPIC_API_KEY");
 
         let mut validator = ConfigurationValidator::new(false);
         let result = validator.validate_settings(&settings);
@@ -397,7 +326,8 @@ mod tests {
     #[test]
     fn test_strict_mode_warnings() {
         let mut settings = create_test_settings();
-        settings.ai.model = "unknown-model".to_string(); // This should generate a warning
+        // Create a condition that generates warnings (e.g., empty exclude patterns)
+        settings.workspace.exclude_patterns = Vec::new();
 
         let mut validator = ConfigurationValidator::new(true);
         let result = validator.validate_settings(&settings);
@@ -409,7 +339,8 @@ mod tests {
     #[test]
     fn test_lenient_mode_warnings() {
         let mut settings = create_test_settings();
-        settings.ai.model = "unknown-model".to_string(); // This should generate a warning
+        // Create a condition that generates warnings (e.g., empty exclude patterns)
+        settings.workspace.exclude_patterns = Vec::new();
 
         let mut validator = ConfigurationValidator::new(false);
         let result = validator.validate_settings(&settings);
