@@ -1,6 +1,8 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt, EnvFilter};
 
 pub mod settings;
+pub mod security;
+pub mod validation;
 
 /// Initialize logging system with structured output and environment-based level filtering
 pub fn init_logging() -> anyhow::Result<()> {

@@ -43,38 +43,91 @@ pub trait MessageCallback {
     fn on_message(&self, message: StreamMessage) -> Result<()>;
 }
 
-/// Session manager for handling multiple concurrent sessions
+/// Session manager for handling multiple concurrent sessions with performance optimizations
 pub struct SessionManager {
     sessions: Arc<RwLock<std::collections::HashMap<String, Arc<RwLock<GooseSessionWrapper>>>>>,
+    /// LRU cache for recently accessed sessions
+    session_cache: Arc<RwLock<lru::LruCache<String, Arc<RwLock<GooseSessionWrapper>>>>>,
+    /// Maximum number of concurrent sessions
+    max_concurrent_sessions: u32,
+    /// Connection pool for agent sessions
+    agent_pool: Arc<RwLock<Vec<String>>>, // Pool of available agent connection IDs
 }
 
 impl SessionManager {
     pub fn new() -> Self {
+        Self::with_config(100, 10) // Default: 100 cache entries, 10 max concurrent sessions
+    }
+
+    pub fn with_config(cache_size: usize, max_sessions: u32) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            session_cache: Arc::new(RwLock::new(lru::LruCache::new(cache_size.try_into().unwrap()))),
+            max_concurrent_sessions: max_sessions,
+            agent_pool: Arc::new(RwLock::new(Vec::with_capacity(max_sessions as usize))),
         }
     }
 
     pub async fn create_session(&self, ai_session: &AiSession) -> Result<Arc<RwLock<GooseSessionWrapper>>> {
+        // Check if we're at capacity
+        let current_count = self.active_session_count().await;
+        if current_count >= self.max_concurrent_sessions as usize {
+            return Err(anyhow::anyhow!("Maximum concurrent sessions ({}) reached", self.max_concurrent_sessions));
+        }
+
         let mut wrapper = GooseSessionWrapper::new(ai_session).await?;
         wrapper.initialize().await?;
 
         let session_arc = Arc::new(RwLock::new(wrapper));
-        let mut sessions = self.sessions.write().await;
-        sessions.insert(ai_session.id.clone(), session_arc.clone());
 
-        info!("Session created and stored: {}", ai_session.id);
+        // Store in both main sessions and cache
+        {
+            let mut sessions = self.sessions.write().await;
+            sessions.insert(ai_session.id.clone(), session_arc.clone());
+        }
+        {
+            let mut cache = self.session_cache.write().await;
+            cache.put(ai_session.id.clone(), session_arc.clone());
+        }
+
+        info!("Session created and stored: {} (total sessions: {})", ai_session.id, current_count + 1);
         Ok(session_arc)
     }
 
     pub async fn get_session(&self, session_id: &str) -> Option<Arc<RwLock<GooseSessionWrapper>>> {
+        // Check cache first for hot sessions
+        {
+            let mut cache = self.session_cache.write().await;
+            if let Some(session) = cache.get(session_id) {
+                return Some(session.clone());
+            }
+        }
+
+        // Fallback to main storage
         let sessions = self.sessions.read().await;
-        sessions.get(session_id).cloned()
+        if let Some(session) = sessions.get(session_id).cloned() {
+            // Update cache with accessed session
+            let mut cache = self.session_cache.write().await;
+            cache.put(session_id.to_string(), session.clone());
+            Some(session)
+        } else {
+            None
+        }
     }
 
     pub async fn remove_session(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session_arc) = sessions.remove(session_id) {
+        let session_arc = {
+            let mut sessions = self.sessions.write().await;
+            sessions.remove(session_id)
+        };
+
+        // Also remove from cache
+        {
+            let mut cache = self.session_cache.write().await;
+            cache.pop(session_id);
+        }
+
+        if let Some(session_arc) = session_arc {
             let session = session_arc.write().await;
             session.cleanup().await?;
             info!("Session removed and cleaned up: {}", session_id);

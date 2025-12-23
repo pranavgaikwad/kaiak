@@ -292,8 +292,8 @@ impl LifecycleHandler {
                     .filter_map(|(i, result)| {
                         match result {
                             Ok(Ok(())) => None,
-                            Ok(Err(e)) => Some((i, e)),
-                            Err(e) => Some((i, e)),
+                            Ok(Err(_)) => Some(i),  // Session termination failed
+                            Err(_) => Some(i),      // Task join failed
                         }
                     })
                     .collect();

@@ -267,7 +267,7 @@ impl SessionMonitor {
         })?;
 
         if let Some(tracker) = sessions.get_mut(session_id) {
-            tracker.session.status = status;
+            tracker.session.status = status.clone();
             tracker.update_activity();
             debug!("Updated session status: {} -> {:?}", session_id, status);
         }
@@ -397,7 +397,7 @@ impl SessionMonitor {
             operations_per_minute,
             average_response_time_ms: average_response_time.as_millis() as f64,
             peak_memory_bytes: peak_memory,
-            total_processing_time_ms: total_processing_time.as_millis(),
+            total_processing_time_ms: total_processing_time.as_millis() as u64,
         })
     }
 
@@ -523,7 +523,7 @@ impl SessionMonitor {
                             average_response_time_ms: tracker.get_average_response_time()
                                 .unwrap_or(Duration::from_millis(0)).as_millis() as f64,
                             peak_memory_bytes: tracker.get_peak_memory(),
-                            total_processing_time_ms: tracker.operation_times.iter().sum::<Duration>().as_millis(),
+                            total_processing_time_ms: tracker.operation_times.iter().sum::<Duration>().as_millis() as u64,
                         };
 
                         // Store metrics would happen here

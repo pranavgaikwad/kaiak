@@ -659,8 +659,12 @@ impl ResourceManager {
             for session_id in sessions_to_cleanup {
                 warn!("Cleaning up session due to resource limits: {}", session_id);
 
-                let mut trackers_lock = trackers.lock().unwrap();
-                if let Some(mut tracker) = trackers_lock.remove(&session_id) {
+                let tracker_opt = {
+                    let mut trackers_lock = trackers.lock().unwrap();
+                    trackers_lock.remove(&session_id)
+                };
+
+                if let Some(mut tracker) = tracker_opt {
                     if let Err(e) = tracker.cleanup().await {
                         error!("Failed to cleanup session {}: {}", session_id, e);
                     }

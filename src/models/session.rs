@@ -28,7 +28,7 @@ pub enum SessionStatus {
     Terminated,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionConfiguration {
     pub workspace_path: String,
     pub session_name: Option<String>,

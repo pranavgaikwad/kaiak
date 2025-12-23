@@ -83,11 +83,33 @@ impl KaiakServer {
         let lifecycle_handler = self.lifecycle_handler.read().await;
         let handler = lifecycle_handler.as_ref().unwrap();
 
-        match handler.create_session(params.workspace_path.clone(), params.session_name.clone()).await {
-            Ok(ai_session) => {
-                info!("Session created: {}", ai_session.id);
+        // Create session object for new interface
+        let session = crate::models::session::Session {
+            id: crate::models::Id::new(),
+            goose_session_id: uuid::Uuid::new_v4().to_string(),
+            status: crate::models::session::SessionStatus::Created,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            configuration: crate::models::session::SessionConfiguration {
+                workspace_path: params.workspace_path.clone(),
+                session_name: params.session_name.clone(),
+                provider: None,
+                model: None,
+                timeout: None,
+                max_turns: None,
+                custom: Default::default(),
+            },
+            active_request_id: None,
+            message_count: 0,
+            error_count: 0,
+        };
+
+        let session_id = session.id.clone();
+        match handler.create_session(session).await {
+            Ok(()) => {
+                info!("Session created: {}", session_id);
                 Ok(CreateSessionResponse {
-                    session_id: ai_session.id,
+                    session_id: session_id,
                     status: "ready".to_string(),
                     created_at: chrono::Utc::now().to_rfc3339(),
                 })
