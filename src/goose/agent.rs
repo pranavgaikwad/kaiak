@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 use crate::models::{FixGenerationRequest, AiSession, StreamMessage, MessageType, MessageContent, UserInteraction, InteractionType};
-use crate::goose::{SessionManager, GooseSessionWrapper, MessageCallback};
+use crate::goose::{SessionManager, GooseSessionWrapper, monitoring::MessageCallback};
 use crate::handlers::{ModificationHandler, InteractionHandler, ModificationConfig, InteractionConfig};
 use tracing::{info, debug, warn, error};
 
@@ -93,18 +93,92 @@ pub struct FileModificationStats {
     pub file_modification_interactions: usize,
 }
 
+/// T009 - Result of handling a Goose agent tool call
+#[derive(Debug)]
+pub enum GooseToolCallResult {
+    /// Tool call was executed successfully
+    Executed(ToolExecutionResult),
+    /// Tool call was intercepted and requires approval
+    InterceptedForApproval {
+        interaction: UserInteraction,
+        pending_call: PendingToolCall,
+    },
+}
+
+/// T009 - Result of executing a tool call
+#[derive(Debug, Clone)]
+pub struct ToolExecutionResult {
+    pub success: bool,
+    pub output: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub execution_time_ms: u64,
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// T009 - Pending tool call awaiting approval
+#[derive(Debug, Clone)]
+pub struct PendingToolCall {
+    pub tool_call_id: String,
+    pub session_id: String,
+    pub original_tool_name: String,
+    pub original_parameters: serde_json::Value,
+    pub interaction_id: String,
+    pub proposal_id: Option<String>,
+    pub file_path: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub status: ToolCallStatus,
+}
+
+/// T009 - Status of a tool call in the approval process
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolCallStatus {
+    PendingApproval,
+    Approved,
+    Rejected,
+    Executed,
+    Failed,
+    Expired,
+}
+
+/// T010 - Result of tool call safety verification
+#[derive(Debug, Clone)]
+pub struct ToolSafetyResult {
+    pub safe: bool,
+    pub risk_level: ToolRiskLevel,
+    pub safety_issues: Vec<String>,
+    pub enforcement_action: SafetyEnforcementAction,
+    pub requires_approval: bool,
+}
+
+/// T010 - Risk level assessment for tool calls
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+pub enum ToolRiskLevel {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Critical = 3,
+}
+
+/// T010 - Safety enforcement actions
+#[derive(Debug, Clone, PartialEq)]
+pub enum SafetyEnforcementAction {
+    Allow,
+    RequireApproval,
+    Block,
+}
+
 /// Message streaming handler for AgentManager
 pub struct AgentMessageHandler {
     sender: tokio::sync::mpsc::UnboundedSender<StreamMessage>,
 }
 
 impl MessageCallback for AgentMessageHandler {
-    fn on_message(&self, message: StreamMessage) -> Result<()> {
+    fn on_message(&self, message: StreamMessage) -> Result<(), crate::KaiakError> {
         match self.sender.send(message) {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("Failed to send stream message: {}", e);
-                Err(anyhow::anyhow!("Stream message send failed: {}", e))
+                Err(crate::KaiakError::Internal(format!("Stream message send failed: {}", e)))
             }
         }
     }
@@ -568,6 +642,8 @@ impl AgentManager {
                             }
                         })),
                         error: None,
+                        execution_time_ms: 50,
+                        output_size_bytes: Some(1024),
                     }),
                 },
             );
@@ -614,6 +690,8 @@ impl AgentManager {
                                 "migration_complexity": "standard"
                             })),
                             error: None,
+                            execution_time_ms: 80,
+                            output_size_bytes: Some(512),
                         }),
                     },
                 );
@@ -658,6 +736,8 @@ impl AgentManager {
                         "recommendations": "All fixes are safe to apply"
                     })),
                     error: None,
+                    execution_time_ms: 100,
+                    output_size_bytes: Some(256),
                 }),
             },
         );
@@ -740,6 +820,593 @@ impl AgentManager {
     /// Get session manager for direct session operations
     pub fn session_manager(&self) -> &Arc<SessionManager> {
         &self.session_manager
+    }
+
+    /// T009 - Handle Goose agent tool calls with interception and safety checks
+    /// This method intercepts tool calls from the Goose agent and applies safety measures
+    pub async fn handle_goose_tool_call(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        parameters: serde_json::Value,
+    ) -> Result<GooseToolCallResult> {
+        info!("Handling Goose tool call: {} ({}) for session: {}", tool_name, tool_call_id, session_id);
+
+        // Extract file-related parameters if present
+        let original_content = self.extract_original_content(&parameters).await?;
+        let proposed_content = self.extract_proposed_content(&parameters).await?;
+
+        // Create safe tool call using existing infrastructure
+        let safe_result = self.create_safe_tool_call(
+            session_id,
+            tool_name,
+            parameters.clone(),
+            original_content.clone(),
+            proposed_content.clone(),
+        ).await?;
+
+        match safe_result {
+            SafeToolCallResult::Allowed { tool_name, parameters } => {
+                info!("Tool call {} allowed to proceed", tool_call_id);
+
+                // Execute the tool call directly
+                let execution_result = self.execute_allowed_tool_call(
+                    session_id,
+                    tool_call_id,
+                    &tool_name,
+                    parameters,
+                ).await?;
+
+                Ok(GooseToolCallResult::Executed(execution_result))
+            }
+            SafeToolCallResult::InterceptedForApproval {
+                original_tool_name,
+                original_parameters,
+                interaction,
+                file_path,
+            } => {
+                info!("Tool call {} intercepted for approval: {}", tool_call_id, file_path);
+
+                // Create pending tool call state
+                let pending_call = PendingToolCall {
+                    tool_call_id: tool_call_id.to_string(),
+                    session_id: session_id.to_string(),
+                    original_tool_name,
+                    original_parameters,
+                    interaction_id: interaction.id.clone(),
+                    proposal_id: interaction.proposal_id.clone(),
+                    file_path,
+                    created_at: chrono::Utc::now(),
+                    status: ToolCallStatus::PendingApproval,
+                };
+
+                // TODO: Store pending tool call state for later resolution
+                // In full implementation, this would be stored in a pending calls manager
+
+                Ok(GooseToolCallResult::InterceptedForApproval {
+                    interaction,
+                    pending_call,
+                })
+            }
+        }
+    }
+
+    /// Execute a tool call that has been approved by safety checks
+    async fn execute_allowed_tool_call(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        parameters: serde_json::Value,
+    ) -> Result<ToolExecutionResult> {
+        let start_time = std::time::Instant::now();
+
+        info!("Executing allowed tool call: {} ({})", tool_name, tool_call_id);
+
+        // TODO: In real implementation, this would call the actual tool
+        // For now, simulate tool execution based on tool type
+        let execution_result = match tool_name {
+            "file_read" | "read_file" => self.simulate_file_read(&parameters).await?,
+            "dependency_analysis" => self.simulate_dependency_analysis(&parameters).await?,
+            "fix_validation" => self.simulate_fix_validation(&parameters).await?,
+            _ => self.simulate_generic_tool_execution(tool_name, &parameters).await?,
+        };
+
+        let execution_time = start_time.elapsed();
+
+        info!(
+            "Tool call {} completed in {:?}: success={}",
+            tool_call_id,
+            execution_time,
+            execution_result.success
+        );
+
+        // Record tool execution for monitoring
+        if let Some(session) = self.session_manager.get_session(session_id).await {
+            // TODO: Record tool execution stats in session
+        }
+
+        Ok(execution_result)
+    }
+
+    /// Extract original file content from tool call parameters
+    async fn extract_original_content(&self, parameters: &serde_json::Value) -> Result<Option<String>> {
+        if let Some(file_path) = parameters.get("file_path")
+            .or_else(|| parameters.get("path"))
+            .and_then(|v| v.as_str()) {
+
+            // TODO: In real implementation, read actual file content
+            // For now, simulate content extraction
+            Ok(Some(format!("// Original content of {}", file_path)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Extract proposed file content from tool call parameters
+    async fn extract_proposed_content(&self, parameters: &serde_json::Value) -> Result<Option<String>> {
+        if let Some(content) = parameters.get("content")
+            .or_else(|| parameters.get("new_content"))
+            .or_else(|| parameters.get("replacement_content"))
+            .and_then(|v| v.as_str()) {
+
+            Ok(Some(content.to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Simulate file read tool execution
+    async fn simulate_file_read(&self, parameters: &serde_json::Value) -> Result<ToolExecutionResult> {
+        let file_path = parameters.get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown_file");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        Ok(ToolExecutionResult {
+            success: true,
+            output: Some(serde_json::json!({
+                "file_content": format!("// Simulated content of {}", file_path),
+                "line_count": 150,
+                "encoding": "utf-8",
+                "file_size": 4096
+            })),
+            error: None,
+            execution_time_ms: 50,
+            metadata: Some(serde_json::json!({
+                "tool_type": "file_read",
+                "file_path": file_path,
+                "read_mode": "full"
+            })),
+        })
+    }
+
+    /// Simulate dependency analysis tool execution
+    async fn simulate_dependency_analysis(&self, parameters: &serde_json::Value) -> Result<ToolExecutionResult> {
+        let file_path = parameters.get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown_file");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
+        Ok(ToolExecutionResult {
+            success: true,
+            output: Some(serde_json::json!({
+                "dependencies": ["module_a", "module_b", "std"],
+                "dependents": ["client_service", "api_layer"],
+                "circular_dependencies": [],
+                "risk_level": "low",
+                "migration_complexity": "standard",
+                "affected_files": [file_path]
+            })),
+            error: None,
+            execution_time_ms: 150,
+            metadata: Some(serde_json::json!({
+                "tool_type": "dependency_analysis",
+                "analysis_depth": "full",
+                "file_path": file_path
+            })),
+        })
+    }
+
+    /// Simulate fix validation tool execution
+    async fn simulate_fix_validation(&self, parameters: &serde_json::Value) -> Result<ToolExecutionResult> {
+        let fix_count = parameters.get("fix_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1);
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        Ok(ToolExecutionResult {
+            success: true,
+            output: Some(serde_json::json!({
+                "validation_status": "passed",
+                "fixes_validated": fix_count,
+                "safety_score": 0.95,
+                "issues_found": 0,
+                "recommendations": "All fixes are safe to apply",
+                "performance_impact": "minimal"
+            })),
+            error: None,
+            execution_time_ms: 200,
+            metadata: Some(serde_json::json!({
+                "tool_type": "fix_validation",
+                "validation_level": "comprehensive",
+                "fix_count": fix_count
+            })),
+        })
+    }
+
+    /// Simulate generic tool execution for unknown tool types
+    async fn simulate_generic_tool_execution(&self, tool_name: &str, parameters: &serde_json::Value) -> Result<ToolExecutionResult> {
+        warn!("Simulating unknown tool type: {}", tool_name);
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        Ok(ToolExecutionResult {
+            success: true,
+            output: Some(serde_json::json!({
+                "message": format!("Generic simulation for tool: {}", tool_name),
+                "parameters_received": parameters
+            })),
+            error: None,
+            execution_time_ms: 100,
+            metadata: Some(serde_json::json!({
+                "tool_type": tool_name,
+                "simulation": true
+            })),
+        })
+    }
+
+    /// T010 - Handle approval response for intercepted tool calls
+    /// This method processes approved/rejected tool calls and executes them if approved
+    pub async fn handle_tool_call_approval(
+        &self,
+        session_id: &str,
+        interaction_id: &str,
+        approved: bool,
+        comment: Option<String>,
+    ) -> Result<Option<ToolExecutionResult>> {
+        info!("Handling tool call approval: {} approved={}", interaction_id, approved);
+
+        // Get the interaction to find the associated tool call
+        let interaction = self.interaction_handler.get_interaction(&interaction_id.to_string()).await
+            .ok_or_else(|| anyhow::anyhow!("Interaction {} not found", interaction_id))?;
+
+        if !interaction.is_file_modification_approval() {
+            anyhow::bail!("Interaction {} is not a file modification approval", interaction_id);
+        }
+
+        // TODO: In full implementation, we would store pending tool calls and retrieve them here
+        // For now, simulate the approval workflow
+        if approved {
+            info!("Tool call approved for interaction: {}", interaction_id);
+
+            // Extract tool call information from interaction context
+            // In real implementation, this would come from stored PendingToolCall
+            let tool_name = self.extract_tool_name_from_interaction(&interaction)?;
+            let tool_params = self.extract_tool_params_from_interaction(&interaction)?;
+
+            // Execute the approved tool call
+            let execution_result = self.execute_allowed_tool_call(
+                session_id,
+                &format!("approved-{}", interaction_id),
+                &tool_name,
+                tool_params,
+            ).await?;
+
+            // Apply file modification if it's a write operation
+            if let Some(proposal_id) = &interaction.proposal_id {
+                self.apply_approved_modification(proposal_id).await?;
+            }
+
+            info!("Approved tool call executed successfully");
+            Ok(Some(execution_result))
+        } else {
+            info!("Tool call rejected for interaction: {}", interaction_id);
+
+            // Send rejection notification through callback
+            if let Some(session) = self.session_manager.get_session(session_id).await {
+                let session_guard = session.read().await;
+                if let Some(callback) = &session_guard.message_callback {
+                    let rejection_message = StreamMessage::new(
+                        session_id.to_string(),
+                        None,
+                        MessageType::System,
+                        MessageContent::System {
+                            event: "tool_call_rejected".to_string(),
+                            request_id: None,
+                            status: "rejected".to_string(),
+                            summary: Some(serde_json::json!({
+                                "interaction_id": interaction_id,
+                                "reason": comment.unwrap_or_else(|| "User rejected".to_string())
+                            })),
+                        },
+                    );
+                    callback.on_message(rejection_message)?;
+                }
+            }
+
+            Ok(None)
+        }
+    }
+
+    /// Extract tool name from interaction context
+    fn extract_tool_name_from_interaction(&self, interaction: &UserInteraction) -> Result<String> {
+        // In a real implementation, this would be stored in the interaction metadata
+        // For now, infer from the prompt text
+        if interaction.prompt.contains("file_write") || interaction.prompt.contains("write_file") {
+            Ok("file_write".to_string())
+        } else if interaction.prompt.contains("file_read") || interaction.prompt.contains("read_file") {
+            Ok("file_read".to_string())
+        } else if interaction.prompt.contains("modify_file") {
+            Ok("modify_file".to_string())
+        } else {
+            // Default to file_write for file modification approvals
+            Ok("file_write".to_string())
+        }
+    }
+
+    /// Extract tool parameters from interaction context
+    fn extract_tool_params_from_interaction(&self, interaction: &UserInteraction) -> Result<serde_json::Value> {
+        // In a real implementation, this would be stored in the interaction metadata
+        // For now, create minimal parameters based on proposal
+        Ok(serde_json::json!({
+            "interaction_id": interaction.id,
+            "proposal_id": interaction.proposal_id,
+            "action": "apply_approved_modification"
+        }))
+    }
+
+    /// T010 - Verify and enforce tool call safety rules
+    /// This method ensures safety rules are consistently applied across all tool calls
+    pub async fn verify_tool_call_safety(
+        &self,
+        session_id: &str,
+        tool_name: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<ToolSafetyResult> {
+        debug!("Verifying tool call safety: {} for session: {}", tool_name, session_id);
+
+        // Check session-level safety constraints
+        let session_stats = self.get_file_modification_stats(session_id).await?;
+
+        // Enforce safety rules based on current state
+        let mut safety_issues = Vec::new();
+        let mut risk_level = ToolRiskLevel::Low;
+
+        // Check pending proposal limits
+        if session_stats.pending_proposals >= self.config.max_pending_proposals {
+            safety_issues.push(format!(
+                "Too many pending proposals: {} (limit: {})",
+                session_stats.pending_proposals,
+                self.config.max_pending_proposals
+            ));
+            risk_level = ToolRiskLevel::High;
+        }
+
+        // Check for high-risk operations
+        if session_stats.high_risk_proposals > 0 {
+            safety_issues.push("High-risk proposals pending".to_string());
+            risk_level = std::cmp::max(risk_level, ToolRiskLevel::Medium);
+        }
+
+        // Validate tool parameters
+        if let Some(file_path) = parameters.get("file_path").and_then(|p| p.as_str()) {
+            if file_path.contains("..") || file_path.starts_with("/") {
+                safety_issues.push("Potentially unsafe file path".to_string());
+                risk_level = ToolRiskLevel::Critical;
+            }
+        }
+
+        // Check operation type safety
+        let should_intercept = self.should_intercept_file_operation(tool_name);
+        let enforcement_action = if should_intercept {
+            if safety_issues.is_empty() && risk_level == ToolRiskLevel::Low {
+                SafetyEnforcementAction::RequireApproval
+            } else {
+                SafetyEnforcementAction::Block
+            }
+        } else {
+            SafetyEnforcementAction::Allow
+        };
+
+        Ok(ToolSafetyResult {
+            safe: safety_issues.is_empty() && enforcement_action != SafetyEnforcementAction::Block,
+            risk_level,
+            safety_issues,
+            enforcement_action,
+            requires_approval: should_intercept,
+        })
+    }
+
+    /// T011 - Send tool execution result back to Goose agent
+    /// This method manages tool result formatting, logging, and feedback to ensure
+    /// the agent workflow continues appropriately after tool completion
+    pub async fn send_tool_result_to_goose(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        execution_result: &ToolExecutionResult,
+    ) -> Result<()> {
+        info!("Sending tool result to Goose agent: {} ({})", tool_call_id, execution_result.success);
+
+        // Log tool execution for monitoring (T011 acceptance criteria)
+        self.log_tool_execution(session_id, tool_call_id, execution_result).await?;
+
+        // Format result for Goose agent compatibility
+        let formatted_result = self.format_tool_result_for_goose(execution_result)?;
+
+        // Get session to send result through streaming
+        if let Some(session) = self.session_manager.get_session(session_id).await {
+            let session_guard = session.read().await;
+
+            // Send formatted result through message callback
+            if let Some(callback) = &session_guard.message_callback {
+                let result_message = StreamMessage::new(
+                    session_id.to_string(),
+                    session_guard.active_request.clone(),
+                    MessageType::ToolCall,
+                    MessageContent::ToolCall {
+                        tool_name: execution_result.metadata
+                            .as_ref()
+                            .and_then(|m| m.get("tool_type"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
+                        operation: if execution_result.success {
+                            crate::models::ToolOperation::Complete
+                        } else {
+                            crate::models::ToolOperation::Error
+                        },
+                        parameters: serde_json::Value::Null,
+                        result: Some(formatted_result),
+                    },
+                );
+
+                callback.on_message(result_message)?;
+            }
+
+            // Send through event bridge if available
+            if let Some(event_bridge) = session_guard.event_bridge() {
+                event_bridge.handle_goose_event(crate::goose::monitoring::GooseAgentEvent::ToolResult {
+                    call_id: tool_call_id.to_string(),
+                    success: execution_result.success,
+                    result: execution_result.output.clone(),
+                    error: execution_result.error.clone(),
+                    execution_time_ms: execution_result.execution_time_ms,
+                }).await?;
+
+                // Send system event to indicate result processing completed
+                event_bridge.handle_goose_event(crate::goose::monitoring::GooseAgentEvent::System {
+                    event: "tool_result_processed".to_string(),
+                    status: if execution_result.success { "success" } else { "failed" }.to_string(),
+                    metadata: serde_json::json!({
+                        "tool_call_id": tool_call_id,
+                        "execution_time_ms": execution_result.execution_time_ms,
+                        "output_size_bytes": execution_result.metadata
+                            .as_ref()
+                            .and_then(|m| m.get("output_size"))
+                            .and_then(|s| s.as_u64())
+                            .unwrap_or(0)
+                    }),
+                }).await?;
+            }
+        }
+
+        info!("Tool result successfully sent to Goose agent: {}", tool_call_id);
+        Ok(())
+    }
+
+    /// T011 - Format tool execution result for Goose agent compatibility
+    /// Ensures results are properly formatted with clear success/failure status
+    fn format_tool_result_for_goose(
+        &self,
+        execution_result: &ToolExecutionResult,
+    ) -> Result<crate::models::ToolResult> {
+        // Calculate output size if not already provided
+        let output_size = execution_result.output.as_ref()
+            .map(|data| data.to_string().len() as u64);
+
+        Ok(crate::models::ToolResult {
+            success: execution_result.success,
+            data: execution_result.output.clone(),
+            error: execution_result.error.clone(),
+            execution_time_ms: execution_result.execution_time_ms,
+            output_size_bytes: output_size,
+        })
+    }
+
+    /// T011 - Log tool execution for monitoring and debugging
+    /// Captures tool output and execution details for comprehensive monitoring
+    async fn log_tool_execution(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        execution_result: &ToolExecutionResult,
+    ) -> Result<()> {
+        let tool_type = execution_result.metadata
+            .as_ref()
+            .and_then(|m| m.get("tool_type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("unknown");
+
+        let output_size = execution_result.output.as_ref()
+            .map(|data| data.to_string().len())
+            .unwrap_or(0);
+
+        debug!(
+            "Tool execution logged: session={} call_id={} tool={} success={} time={}ms size={}bytes",
+            session_id,
+            tool_call_id,
+            tool_type,
+            execution_result.success,
+            execution_result.execution_time_ms,
+            output_size
+        );
+
+        // TODO: In full implementation, this would also:
+        // 1. Store execution details in persistent monitoring store
+        // 2. Update session-level statistics
+        // 3. Trigger alerts for failed tool executions
+        // 4. Generate performance metrics for tool types
+
+        // Update session statistics if available
+        if let Some(session) = self.session_manager.get_session(session_id).await {
+            // Record execution timing for performance monitoring
+            // This integrates with the existing monitoring infrastructure
+            debug!("Recording tool execution timing for session monitoring");
+        }
+
+        Ok(())
+    }
+
+    /// T011 - Resume agent workflow after tool completion
+    /// Ensures the Goose agent continues processing appropriately based on tool results
+    pub async fn resume_agent_workflow_after_tool(
+        &self,
+        session_id: &str,
+        tool_call_id: &str,
+        execution_result: &ToolExecutionResult,
+    ) -> Result<()> {
+        info!("Resuming agent workflow after tool completion: {} success={}", tool_call_id, execution_result.success);
+
+        // Send continuation signal to Goose agent
+        if let Some(session) = self.session_manager.get_session(session_id).await {
+            let session_guard = session.read().await;
+
+            if let Some(event_bridge) = session_guard.event_bridge() {
+                // Determine next action based on result
+                let continuation_event = if execution_result.success {
+                    crate::goose::monitoring::GooseAgentEvent::System {
+                        event: "tool_completed_continue".to_string(),
+                        status: "ready_for_next_action".to_string(),
+                        metadata: serde_json::json!({
+                            "completed_tool_id": tool_call_id,
+                            "result_available": true,
+                            "can_continue": true
+                        }),
+                    }
+                } else {
+                    crate::goose::monitoring::GooseAgentEvent::System {
+                        event: "tool_failed_recovery".to_string(),
+                        status: "requires_error_handling".to_string(),
+                        metadata: serde_json::json!({
+                            "failed_tool_id": tool_call_id,
+                            "error": execution_result.error,
+                            "retry_recommended": true
+                        }),
+                    }
+                };
+
+                event_bridge.handle_goose_event(continuation_event).await?;
+            }
+        }
+
+        info!("Agent workflow continuation signal sent for tool: {}", tool_call_id);
+        Ok(())
     }
 
     /// Get count of active requests

@@ -98,6 +98,8 @@ pub struct ToolResult {
     pub success: bool,
     pub data: Option<serde_json::Value>,
     pub error: Option<String>,
+    pub execution_time_ms: u64,
+    pub output_size_bytes: Option<u64>,
 }
 
 impl StreamMessage {

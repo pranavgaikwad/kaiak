@@ -298,6 +298,8 @@ async fn test_tool_call_streaming() -> Result<()> {
                         "line_count": 3
                     })),
                     error: None,
+                    execution_time_ms: 50,
+                    output_size_bytes: Some(64),
                 }),
             },
         );

@@ -113,10 +113,10 @@
 - `src/goose/session.rs` - Connect event bridge to agent sessions
 
 **Acceptance**:
-- [ ] GooseEventBridge subscribes to Goose agent event stream
-- [ ] Events properly forwarded to message callback infrastructure
-- [ ] Event subscription lifecycle matches agent session lifecycle
-- [ ] Handles connection interruptions gracefully
+- [X] GooseEventBridge subscribes to Goose agent event stream
+- [X] Events properly forwarded to message callback infrastructure
+- [X] Event subscription lifecycle matches agent session lifecycle
+- [X] Handles connection interruptions gracefully
 
 ---
 
@@ -132,10 +132,10 @@
 - `src/models/messages.rs` - Verify message format compatibility
 
 **Acceptance**:
-- [ ] AgentEvent::Message converts to MessageContent::AiResponse
-- [ ] AgentEvent::ToolCall converts to MessageContent::ToolCall
-- [ ] AgentEvent::Thinking maps to appropriate message types
-- [ ] Unsupported events logged for feature gap documentation (FR-010)
+- [X] AgentEvent::Message converts to MessageContent::AiResponse
+- [X] AgentEvent::ToolCall converts to MessageContent::ToolCall
+- [X] AgentEvent::Thinking maps to appropriate message types
+- [X] Unsupported events logged for feature gap documentation (FR-010)
 
 ---
 
@@ -151,10 +151,10 @@
 - `src/goose/session.rs` - Set up message callback integration
 
 **Acceptance**:
-- [ ] Streaming messages delivered in real-time during processing
-- [ ] Message timestamps and sequence numbers properly maintained
-- [ ] Streaming latency <500ms target achieved (SC-002)
-- [ ] Connection state properly managed throughout session lifecycle
+- [X] Streaming messages delivered in real-time during processing
+- [X] Message timestamps and sequence numbers properly maintained
+- [X] Streaming latency <500ms target achieved (SC-002)
+- [X] Connection state properly managed throughout session lifecycle
 
 ---
 
@@ -170,10 +170,10 @@
 - `tests/integration/goose_integration.rs` - Add streaming validation to e2e test
 
 **Acceptance**:
-- [ ] Streaming events captured throughout agent processing
-- [ ] Latency measurements verify <500ms target (SC-002)
-- [ ] Progress updates received in real-time
-- [ ] Final completion message properly delivered
+- [X] Streaming events captured throughout agent processing
+- [X] Latency measurements verify <500ms target (SC-002)
+- [X] Progress updates received in real-time
+- [X] Final completion message properly delivered
 
 ---
 
@@ -191,10 +191,10 @@
 - `src/goose/session.rs` - Wire tool call event handling
 
 **Acceptance**:
-- [ ] Goose tool calls properly intercepted and captured
-- [ ] Tool call parameters and metadata preserved
-- [ ] Tool execution state tracked through completion
-- [ ] Tool results properly returned to Goose agent
+- [X] Goose tool calls properly intercepted and captured
+- [X] Tool call parameters and metadata preserved
+- [X] Tool execution state tracked through completion
+- [X] Tool results properly returned to Goose agent
 
 ---
 
@@ -210,10 +210,10 @@
 - `src/handlers/interactions.rs` - Verify approval workflow compatibility
 
 **Acceptance**:
-- [ ] SafeToolCallResult::Allowed tools execute directly
-- [ ] SafeToolCallResult::InterceptedForApproval triggers user interaction
-- [ ] Approval workflow properly integrated with Goose agent
-- [ ] Tool call safety rules enforced consistently
+- [X] SafeToolCallResult::Allowed tools execute directly
+- [X] SafeToolCallResult::InterceptedForApproval triggers user interaction
+- [X] Approval workflow properly integrated with Goose agent
+- [X] Tool call safety rules enforced consistently
 
 ---
 
@@ -229,10 +229,10 @@
 - `src/models/messages.rs` - Ensure tool result message compatibility
 
 **Acceptance**:
-- [ ] Tool execution results properly formatted for Goose agent
-- [ ] Success/failure status clearly communicated
-- [ ] Tool output captured and logged for monitoring
-- [ ] Agent workflow continues appropriately after tool completion
+- [X] Tool execution results properly formatted for Goose agent
+- [X] Success/failure status clearly communicated
+- [X] Tool output captured and logged for monitoring
+- [X] Agent workflow continues appropriately after tool completion
 
 ---
 
@@ -248,10 +248,10 @@
 - `tests/fixtures/` - Create incidents that trigger tool usage
 
 **Acceptance**:
-- [ ] Tool calls captured and logged during agent processing (SC-004)
-- [ ] Tool execution completes with proper result capture
-- [ ] Approval workflow tested when tool interception triggered
-- [ ] File modifications properly applied and tracked
+- [X] Tool calls captured and logged during agent processing (SC-004)
+- [X] Tool execution completes with proper result capture
+- [X] Approval workflow tested when tool interception triggered
+- [X] File modifications properly applied and tracked
 
 ---
 

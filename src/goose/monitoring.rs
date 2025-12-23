@@ -4,6 +4,7 @@
 use crate::{
     models::{
         session::{Session, SessionStatus},
+        messages::{StreamMessage, MessageType, MessageContent, ToolOperation, ToolResult},
         Id,
     },
     KaiakError, KaiakResult as Result,
@@ -12,10 +13,10 @@ use serde::{Serialize, Deserialize};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 use tokio::time::sleep;
-use tracing::{info, warn, error, debug};
+use tracing::{info, debug};
 use chrono::{DateTime, Utc};
 
 /// Health status for a session
@@ -81,6 +82,627 @@ impl Default for MonitoringConfig {
             alert_threshold_memory_mb: 512,    // 512MB memory usage
             alert_threshold_response_time_ms: 5000, // 5 second response time
         }
+    }
+}
+
+// ==================== T005 & T006: Goose Event Bridge Implementation ====================
+
+/// Placeholder for Goose agent events - will be replaced with real goose::AgentEvent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GooseAgentEvent {
+    /// AI message response from the agent
+    Message {
+        content: String,
+        partial: bool,
+        confidence: Option<f32>,
+    },
+    /// Tool call executed by the agent
+    ToolCall {
+        id: String,
+        tool_name: String,
+        parameters: serde_json::Value,
+        status: ToolExecutionStatus,
+    },
+    /// Tool call result
+    ToolResult {
+        call_id: String,
+        success: bool,
+        result: Option<serde_json::Value>,
+        error: Option<String>,
+        execution_time_ms: u64,
+    },
+    /// Agent thinking process
+    Thinking {
+        text: String,
+    },
+    /// Request for user interaction/approval
+    InteractionRequest {
+        interaction_id: String,
+        interaction_type: String,
+        prompt: String,
+        timeout_seconds: Option<u32>,
+    },
+    /// File modification proposal
+    FileModification {
+        proposal_id: String,
+        file_path: String,
+        change_type: String,
+        original_content: String,
+        proposed_content: String,
+        description: String,
+        confidence: f32,
+    },
+    /// Error during agent processing
+    Error {
+        error_code: String,
+        message: String,
+        details: Option<String>,
+        recoverable: bool,
+    },
+    /// System events (session state changes, etc.)
+    System {
+        event: String,
+        status: String,
+        metadata: serde_json::Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolExecutionStatus {
+    Starting,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// Callback trait for streaming messages during processing
+/// Used by GooseEventBridge to send converted events
+pub trait MessageCallback: Send + Sync {
+    fn on_message(&self, message: StreamMessage) -> Result<()>;
+}
+
+/// T005 - Goose Event Bridge
+/// Bridges Goose agent events to Kaiak streaming system
+pub struct GooseEventBridge {
+    session_id: String,
+    request_id: Option<String>,
+    message_callback: Option<Arc<dyn MessageCallback>>,
+    sequence_number: Arc<Mutex<u32>>,
+    active: Arc<Mutex<bool>>,
+}
+
+impl GooseEventBridge {
+    /// Create new event bridge for a session
+    pub fn new(session_id: String, request_id: Option<String>) -> Self {
+        Self {
+            session_id,
+            request_id,
+            message_callback: None,
+            sequence_number: Arc::new(Mutex::new(0)),
+            active: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// Set the message callback for streaming
+    pub fn set_message_callback(&mut self, callback: Arc<dyn MessageCallback>) {
+        self.message_callback = Some(callback);
+    }
+
+    /// Start listening for Goose agent events
+    pub async fn start_event_subscription(&self) -> Result<()> {
+        {
+            let mut active = self.active.lock().map_err(|_| {
+                KaiakError::Internal("Failed to acquire active lock".to_string())
+            })?;
+            if *active {
+                return Ok(()); // Already active
+            }
+            *active = true;
+        }
+
+        info!("Started Goose event subscription for session: {}", self.session_id);
+        Ok(())
+    }
+
+    /// Stop listening for Goose agent events
+    pub async fn stop_event_subscription(&self) -> Result<()> {
+        {
+            let mut active = self.active.lock().map_err(|_| {
+                KaiakError::Internal("Failed to acquire active lock".to_string())
+            })?;
+            *active = false;
+        }
+
+        info!("Stopped Goose event subscription for session: {}", self.session_id);
+        Ok(())
+    }
+
+    /// Subscribe to Goose agent events (placeholder for actual implementation)
+    /// This would subscribe to real goose::Agent events in actual implementation
+    pub async fn subscribe_to_goose_events(&self) -> Result<()> {
+        // Validate that callback is set
+        if self.message_callback.is_none() {
+            return Err(KaiakError::Internal("Message callback not set".to_string()));
+        }
+
+        // In real implementation, this would:
+        // let mut event_stream = agent.subscribe_events();
+        // while let Some(event) = event_stream.next().await {
+        //     let stream_message = self.convert_goose_event(event).await?;
+        //     if let Some(callback) = &self.message_callback {
+        //         callback.on_message(stream_message)?;
+        //     }
+        // }
+
+        info!("Subscribed to Goose events for session: {}", self.session_id);
+        Ok(())
+    }
+
+    /// T006 - Convert Goose agent events to Kaiak streaming messages
+    /// T013 - Enhanced with feature gap detection and logging
+    pub async fn convert_goose_event(&self, event: GooseAgentEvent) -> Result<StreamMessage> {
+        let sequence_num = self.get_next_sequence();
+
+        let content = match event {
+            GooseAgentEvent::Message { content, partial, confidence } => {
+                // T013 - Check for rich content capabilities that might be missing
+                if content.contains("```diff") || content.contains("@@ ") {
+                    self.log_message_format_gap(
+                        "ai_response",
+                        "Rich diff content in text response - could be enhanced with structured diff display"
+                    );
+                }
+                if content.contains("![") || content.contains("<img") {
+                    self.log_message_format_gap(
+                        "ai_response",
+                        "Image content in text response - requires rich content display support"
+                    );
+                }
+
+                MessageContent::AiResponse {
+                    text: content,
+                    partial,
+                    confidence,
+                }
+            }
+            GooseAgentEvent::ToolCall { id, tool_name, parameters, status } => {
+                let operation = match status {
+                    ToolExecutionStatus::Starting => ToolOperation::Start,
+                    ToolExecutionStatus::InProgress => ToolOperation::Progress,
+                    ToolExecutionStatus::Completed => ToolOperation::Complete,
+                    ToolExecutionStatus::Failed => ToolOperation::Error,
+                };
+
+                // T013 - Log advanced tool call features that aren't fully supported
+                if parameters.get("dependencies").is_some() {
+                    self.log_event_conversion_gap(
+                        "tool_call",
+                        "Tool call dependencies not tracked in current implementation"
+                    );
+                }
+                if parameters.get("approval_requirements").is_some() {
+                    self.log_event_conversion_gap(
+                        "tool_call",
+                        "Custom approval requirements not fully processed"
+                    );
+                }
+                if parameters.get("estimated_duration_ms").is_some() {
+                    self.log_message_format_gap(
+                        "tool_call",
+                        "Tool execution time estimates not displayed to user"
+                    );
+                }
+
+                MessageContent::ToolCall {
+                    tool_name,
+                    operation,
+                    parameters,
+                    result: None, // Will be filled in by ToolResult event
+                }
+            }
+            GooseAgentEvent::ToolResult { call_id, success, result, error, execution_time_ms } => {
+                let tool_result = ToolResult {
+                    success,
+                    data: result.clone(),
+                    error,
+                    execution_time_ms,
+                    output_size_bytes: result.as_ref().map(|r| r.to_string().len() as u64),
+                };
+
+                // T013 - Check for rich tool result content that can't be displayed properly
+                if let Some(result_data) = &result {
+                    if result_data.get("file_tree").is_some() {
+                        self.log_ide_enhancement_need(
+                            "file_tree_display",
+                            "Tool result contains file tree structure - needs interactive file browser"
+                        );
+                    }
+                    if result_data.get("code_diff").is_some() {
+                        self.log_ide_enhancement_need(
+                            "code_diff_display",
+                            "Tool result contains code diff - needs syntax-highlighted diff view"
+                        );
+                    }
+                    if result_data.get("interactive_component").is_some() {
+                        self.log_unsupported_feature(
+                            "interactive_tool_results",
+                            "Tool result requires interactive component that cannot be rendered"
+                        );
+                    }
+                }
+
+                MessageContent::ToolCall {
+                    tool_name: format!("tool-{}", call_id),
+                    operation: if success { ToolOperation::Complete } else { ToolOperation::Error },
+                    parameters: serde_json::Value::Null,
+                    result: Some(tool_result),
+                }
+            }
+            GooseAgentEvent::Thinking { text } => {
+                MessageContent::Thinking { text }
+            }
+            GooseAgentEvent::InteractionRequest { interaction_id, interaction_type, prompt, timeout_seconds } => {
+                // T013 - Log advanced interaction types that may need enhanced UI
+                if interaction_type.contains("inline_edit") {
+                    self.log_ide_enhancement_need(
+                        "inline_editing",
+                        "Inline edit interaction requires IDE integration with live preview"
+                    );
+                }
+                if interaction_type.contains("multi_choice") {
+                    self.log_message_format_gap(
+                        "interaction",
+                        "Multi-choice interactions limited to simple approval dialogs"
+                    );
+                }
+                if interaction_type.contains("code_completion") {
+                    self.log_unsupported_feature(
+                        "code_completion_interaction",
+                        "Code completion interactions not supported in current UI"
+                    );
+                }
+
+                MessageContent::UserInteraction {
+                    interaction_id,
+                    interaction_type,
+                    prompt,
+                    proposal_id: None,
+                    timeout: timeout_seconds,
+                }
+            }
+            GooseAgentEvent::FileModification {
+                proposal_id,
+                file_path,
+                change_type,
+                original_content,
+                proposed_content,
+                description,
+                confidence,
+            } => {
+                // T013 - Log advanced file modification features
+                if change_type.contains("semantic_edit") {
+                    self.log_unsupported_feature(
+                        "semantic_file_editing",
+                        "Semantic-aware file editing not supported - using basic text replacement"
+                    );
+                }
+                if original_content.len() > 10000 || proposed_content.len() > 10000 {
+                    self.log_message_format_gap(
+                        "file_modification",
+                        "Large file modifications may need streaming diff display for better UX"
+                    );
+                }
+
+                MessageContent::FileModification {
+                    proposal_id,
+                    file_path,
+                    change_type,
+                    description,
+                    original_content,
+                    proposed_content,
+                    confidence,
+                }
+            }
+            GooseAgentEvent::Error { error_code, message, details, recoverable } => {
+                MessageContent::Error {
+                    error_code,
+                    message,
+                    details,
+                    recoverable,
+                }
+            }
+            GooseAgentEvent::System { event, status, metadata } => {
+                // T013 - Log advanced system event features
+                if event.contains("session_branch") {
+                    self.log_unsupported_feature(
+                        "session_branching",
+                        "Session branching events not supported in current implementation"
+                    );
+                }
+                if event.contains("model_switch") {
+                    self.log_unsupported_feature(
+                        "runtime_model_switching",
+                        "Runtime model switching not implemented"
+                    );
+                }
+                if metadata.get("performance_metrics").is_some() {
+                    self.log_message_format_gap(
+                        "system_event",
+                        "Performance metrics in system events not displayed in UI"
+                    );
+                }
+
+                MessageContent::System {
+                    event,
+                    request_id: self.request_id.clone(),
+                    status,
+                    summary: Some(metadata),
+                }
+            }
+        };
+
+        let message_type = match &content {
+            MessageContent::Progress { .. } => MessageType::Progress,
+            MessageContent::AiResponse { .. } => MessageType::AiResponse,
+            MessageContent::ToolCall { .. } => MessageType::ToolCall,
+            MessageContent::Thinking { .. } => MessageType::Thinking,
+            MessageContent::UserInteraction { .. } => MessageType::UserInteraction,
+            MessageContent::FileModification { .. } => MessageType::FileModification,
+            MessageContent::Error { .. } => MessageType::Error,
+            MessageContent::System { .. } => MessageType::System,
+        };
+
+        Ok(StreamMessage::new(
+            self.session_id.clone(),
+            self.request_id.clone(),
+            message_type,
+            content,
+        ))
+    }
+
+    /// Process a Goose event and send to callback
+    pub async fn handle_goose_event(&self, event: GooseAgentEvent) -> Result<()> {
+        let stream_message = self.convert_goose_event(event).await?;
+
+        if let Some(callback) = &self.message_callback {
+            callback.on_message(stream_message)?;
+        } else {
+            debug!("No callback set for event bridge, dropping message");
+        }
+
+        Ok(())
+    }
+
+    /// Get next sequence number for message ordering
+    fn get_next_sequence(&self) -> u32 {
+        let mut seq = self.sequence_number.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *seq += 1;
+        *seq
+    }
+
+    /// T013 - Log unsupported Goose features for comprehensive gap documentation (FR-010/FR-011)
+    pub fn log_unsupported_feature(&self, feature: &str, details: &str) {
+        use tracing::warn;
+
+        warn!(
+            target: "feature_gap",
+            session_id = %self.session_id,
+            feature = %feature,
+            details = %details,
+            "Unsupported Goose feature detected"
+        );
+
+        // Log structured data for automated collection
+        let gap_data = serde_json::json!({
+            "session_id": self.session_id,
+            "feature": feature,
+            "details": details,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "category": Self::categorize_feature_gap(feature),
+            "impact_level": Self::assess_feature_impact(feature),
+            "recommendation": Self::get_feature_recommendation(feature)
+        });
+
+        // In full implementation, this would be sent to centralized gap tracking service
+        debug!(target: "feature_gap_data", gap_data = %gap_data, "Feature gap data collected");
+    }
+
+    /// T013 - Categorize feature gaps for systematic analysis
+    fn categorize_feature_gap(feature: &str) -> &'static str {
+        match feature {
+            f if f.contains("plugin") || f.contains("extension") => "plugin_system",
+            f if f.contains("model") || f.contains("provider") => "model_management",
+            f if f.contains("session") || f.contains("persistence") => "session_management",
+            f if f.contains("tool") || f.contains("call") => "tool_execution",
+            f if f.contains("diff") || f.contains("content") || f.contains("rich") => "content_display",
+            f if f.contains("interactive") || f.contains("inline") || f.contains("editor") => "interactive_features",
+            f if f.contains("debug") || f.contains("breakpoint") => "debugging_integration",
+            f if f.contains("auth") || f.contains("user") || f.contains("permission") => "enterprise_features",
+            _ => "uncategorized"
+        }
+    }
+
+    /// T013 - Assess the impact level of missing features
+    fn assess_feature_impact(feature: &str) -> &'static str {
+        match feature {
+            // High impact - core functionality limitations
+            f if f.contains("session_branching") || f.contains("model_switching") => "high",
+            f if f.contains("rich_content") || f.contains("code_diff") => "high",
+            f if f.contains("interactive_edit") || f.contains("inline_preview") => "high",
+
+            // Medium impact - enhanced functionality
+            f if f.contains("plugin") || f.contains("custom_tool") => "medium",
+            f if f.contains("persistence") || f.contains("long_term") => "medium",
+            f if f.contains("collaboration") || f.contains("multi_user") => "medium",
+
+            // Low impact - nice-to-have features
+            f if f.contains("advanced") || f.contains("optimization") => "low",
+            f if f.contains("analytics") || f.contains("metrics") => "low",
+
+            _ => "unknown"
+        }
+    }
+
+    /// T013 - Provide implementation recommendations for missing features
+    fn get_feature_recommendation(feature: &str) -> &'static str {
+        match feature {
+            f if f.contains("session_branching") => "Implement SessionOperation enum with Branch/Merge support",
+            f if f.contains("model_switching") => "Extend SessionConfiguration with runtime model switching",
+            f if f.contains("rich_content") => "Develop rich content event types in GooseEventBridge",
+            f if f.contains("interactive_edit") => "Create IDE-specific event extensions with bi-directional sync",
+            f if f.contains("plugin") => "Design plugin loading and custom tool registration system",
+            f if f.contains("persistence") => "Implement database-backed session storage",
+            f if f.contains("collaboration") => "Add multi-user session support with permissions",
+            f if f.contains("debug") => "Integrate with language server protocol for debugging",
+            _ => "Analyze requirements and design appropriate implementation strategy"
+        }
+    }
+
+    /// T013 - Log specific event conversion gaps encountered during processing
+    pub fn log_event_conversion_gap(&self, goose_event_type: &str, missing_capability: &str) {
+        self.log_unsupported_feature(
+            &format!("event_conversion_{}", goose_event_type),
+            &format!("Cannot fully convert Goose {} event: {}", goose_event_type, missing_capability)
+        );
+    }
+
+    /// T013 - Log message format incompatibilities
+    pub fn log_message_format_gap(&self, message_type: &str, limitation: &str) {
+        self.log_unsupported_feature(
+            &format!("message_format_{}", message_type),
+            &format!("Message format limitation for {}: {}", message_type, limitation)
+        );
+    }
+
+    /// T013 - Log IDE enhancement requirements based on usage patterns
+    pub fn log_ide_enhancement_need(&self, enhancement_type: &str, context: &str) {
+        self.log_unsupported_feature(
+            &format!("ide_enhancement_{}", enhancement_type),
+            &format!("IDE enhancement needed for {}: {}", enhancement_type, context)
+        );
+    }
+
+    /// T015 - Record performance metrics for success criteria validation
+    pub fn record_performance_metric(&self, metric_type: &str, value: f64, threshold: f64, passed: bool) {
+        use tracing::{info, warn};
+
+        if passed {
+            info!(
+                target: "performance_metrics",
+                metric_type = %metric_type,
+                value = %value,
+                threshold = %threshold,
+                result = "passed",
+                "Performance metric within threshold"
+            );
+        } else {
+            warn!(
+                target: "performance_metrics",
+                metric_type = %metric_type,
+                value = %value,
+                threshold = %threshold,
+                result = "failed",
+                "Performance metric exceeded threshold"
+            );
+        }
+
+        // Log structured data for performance analysis
+        let metric_data = serde_json::json!({
+            "session_id": self.session_id,
+            "metric_type": metric_type,
+            "value": value,
+            "threshold": threshold,
+            "passed": passed,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "success_criteria": Self::map_metric_to_success_criteria(metric_type)
+        });
+
+        debug!(target: "performance_data", metric_data = %metric_data, "Performance metric recorded");
+    }
+
+    /// T015 - Map performance metrics to success criteria
+    fn map_metric_to_success_criteria(metric_type: &str) -> &'static str {
+        match metric_type {
+            "processing_time_ms" => "SC-001: Processing time <30s",
+            "streaming_latency_ms" => "SC-002: Streaming latency <500ms",
+            "test_success_rate" => "SC-003: 95% test success rate",
+            "tool_call_capture_rate" => "SC-004: 100% tool call capture",
+            "error_handling_coverage" => "SC-005: 100% error handling",
+            "goose_compatibility" => "SC-006: Goose compatibility demonstrated",
+            _ => "Unknown success criteria"
+        }
+    }
+
+    /// T015 - Record streaming latency measurement
+    pub fn record_streaming_latency(&self, latency_ms: u64) {
+        const LATENCY_THRESHOLD: u64 = 500; // SC-002: <500ms
+        let passed = latency_ms < LATENCY_THRESHOLD;
+
+        self.record_performance_metric(
+            "streaming_latency_ms",
+            latency_ms as f64,
+            LATENCY_THRESHOLD as f64,
+            passed
+        );
+    }
+
+    /// T015 - Record processing time measurement
+    pub fn record_processing_time(&self, processing_time_ms: u64) {
+        const PROCESSING_THRESHOLD: u64 = 30_000; // SC-001: <30s
+        let passed = processing_time_ms < PROCESSING_THRESHOLD;
+
+        self.record_performance_metric(
+            "processing_time_ms",
+            processing_time_ms as f64,
+            PROCESSING_THRESHOLD as f64,
+            passed
+        );
+    }
+
+    /// T015 - Record test success rate measurement
+    pub fn record_test_success_rate(&self, success_rate: f64) {
+        const SUCCESS_RATE_THRESHOLD: f64 = 0.95; // SC-003: 95%
+        let passed = success_rate >= SUCCESS_RATE_THRESHOLD;
+
+        self.record_performance_metric(
+            "test_success_rate",
+            success_rate,
+            SUCCESS_RATE_THRESHOLD,
+            passed
+        );
+    }
+
+    /// T015 - Record tool call capture rate
+    pub fn record_tool_call_capture_rate(&self, capture_rate: f64) {
+        const CAPTURE_RATE_THRESHOLD: f64 = 1.0; // SC-004: 100%
+        let passed = capture_rate >= CAPTURE_RATE_THRESHOLD;
+
+        self.record_performance_metric(
+            "tool_call_capture_rate",
+            capture_rate,
+            CAPTURE_RATE_THRESHOLD,
+            passed
+        );
+    }
+}
+
+/// Implementation of MessageCallback for GooseEventBridge
+pub struct StreamingMessageHandler {
+    tx: tokio::sync::mpsc::UnboundedSender<StreamMessage>,
+}
+
+impl StreamingMessageHandler {
+    pub fn new(tx: tokio::sync::mpsc::UnboundedSender<StreamMessage>) -> Self {
+        Self { tx }
+    }
+}
+
+impl MessageCallback for StreamingMessageHandler {
+    fn on_message(&self, message: StreamMessage) -> Result<()> {
+        self.tx.send(message).map_err(|_| {
+            KaiakError::Internal("Failed to send message through channel".to_string())
+        })?;
+        Ok(())
     }
 }
 

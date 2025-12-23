@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::models::{AiSession, SessionStatus, FixGenerationRequest, StreamMessage, MessageType, MessageContent};
-use crate::goose::PromptBuilder;
+use crate::goose::{PromptBuilder, monitoring::{GooseEventBridge, MessageCallback, GooseAgentEvent}};
 use tracing::{info, debug, warn, error};
 
 /// Wrapper around Goose session providing Kaiak-specific functionality
@@ -14,6 +14,8 @@ pub struct GooseSessionWrapper {
     /// TODO: Actual Goose agent instance - will hold real goose::Agent
     /// This would be: goose_agent: Option<goose::Agent>
     goose_agent: Option<GooseAgentPlaceholder>,
+    /// Goose Event Bridge for real-time streaming (T005)
+    event_bridge: Option<GooseEventBridge>,
     /// Active request being processed
     pub active_request: Option<String>,
     /// Message callbacks for streaming
@@ -48,10 +50,6 @@ impl Default for SessionConfiguration {
     }
 }
 
-/// Callback trait for streaming messages during processing
-pub trait MessageCallback {
-    fn on_message(&self, message: StreamMessage) -> Result<()>;
-}
 
 /// Session manager for handling multiple concurrent sessions with performance optimizations
 pub struct SessionManager {
@@ -176,6 +174,7 @@ impl GooseSessionWrapper {
             status: SessionStatus::Created,
             configuration: config,
             goose_agent: None,
+            event_bridge: None,
             active_request: None,
             message_callback: None,
         })
@@ -198,15 +197,33 @@ impl GooseSessionWrapper {
             model: self.configuration.model.clone(),
         };
 
+        // Initialize Goose Event Bridge (T005)
+        let mut event_bridge = GooseEventBridge::new(self.session_id.clone(), None);
+
+        // Connect event bridge to message callback if available
+        if let Some(callback) = &self.message_callback {
+            event_bridge.set_message_callback(callback.clone());
+        }
+
+        // Start event subscription
+        event_bridge.start_event_subscription().await?;
+        event_bridge.subscribe_to_goose_events().await?;
+
         self.goose_agent = Some(agent);
+        self.event_bridge = Some(event_bridge);
         self.status = SessionStatus::Ready;
 
-        info!("Goose agent initialized for session: {}", self.session_id);
+        info!("Goose agent and event bridge initialized for session: {}", self.session_id);
         Ok(())
     }
 
     pub async fn cleanup(&self) -> Result<()> {
         info!("Cleaning up Goose session: {}", self.session_id);
+
+        // Stop event bridge subscription
+        if let Some(event_bridge) = &self.event_bridge {
+            event_bridge.stop_event_subscription().await?;
+        }
 
         // TODO: Cleanup actual Goose session
         // This would involve:
@@ -223,7 +240,17 @@ impl GooseSessionWrapper {
     }
 
     pub fn set_message_callback(&mut self, callback: Arc<dyn MessageCallback + Send + Sync>) {
-        self.message_callback = Some(callback);
+        self.message_callback = Some(callback.clone());
+
+        // Also connect to event bridge if it's already initialized
+        if let Some(event_bridge) = &mut self.event_bridge {
+            event_bridge.set_message_callback(callback);
+        }
+    }
+
+    /// Get reference to event bridge for tool result processing
+    pub fn event_bridge(&self) -> &Option<GooseEventBridge> {
+        &self.event_bridge
     }
 
     /// Process a fix generation request through this session
@@ -394,6 +421,87 @@ impl GooseSessionWrapper {
         Ok(())
     }
 
+    /// T009 - Handle tool call from Goose agent with interception and safety
+    pub async fn handle_tool_call_event(
+        &self,
+        tool_call_id: &str,
+        tool_name: &str,
+        parameters: serde_json::Value,
+    ) -> Result<crate::goose::agent::GooseToolCallResult> {
+        info!("Session {} handling tool call: {} ({})", self.session_id, tool_name, tool_call_id);
+
+        // For now, create a simple AgentManager to handle the tool call
+        // In real implementation, this would be passed in or stored as a reference
+        let agent_manager = crate::goose::AgentManager::new().await?;
+
+        agent_manager.handle_goose_tool_call(
+            &self.session_id,
+            tool_call_id,
+            tool_name,
+            parameters,
+        ).await
+    }
+
+    /// Send tool execution result through the message callback
+    pub async fn send_tool_result(&self, tool_result: &crate::goose::agent::ToolExecutionResult) -> Result<()> {
+        if let Some(callback) = &self.message_callback {
+            let message = StreamMessage::new(
+                self.session_id.clone(),
+                self.active_request.clone(),
+                MessageType::ToolCall,
+                MessageContent::ToolCall {
+                    tool_name: tool_result.metadata
+                        .as_ref()
+                        .and_then(|m| m.get("tool_type"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    operation: if tool_result.success {
+                        crate::models::ToolOperation::Complete
+                    } else {
+                        crate::models::ToolOperation::Error
+                    },
+                    parameters: serde_json::Value::Null,
+                    result: Some(crate::models::ToolResult {
+                        success: tool_result.success,
+                        data: tool_result.output.clone(),
+                        error: tool_result.error.clone(),
+                        execution_time_ms: tool_result.execution_time_ms,
+                        output_size_bytes: tool_result.output.as_ref().map(|o| o.to_string().len() as u64),
+                    }),
+                },
+            );
+
+            callback.on_message(message)?;
+        }
+        Ok(())
+    }
+
+    /// Send tool call interception through the message callback
+    pub async fn send_tool_interception(&self, interaction: &crate::models::UserInteraction, tool_name: &str) -> Result<()> {
+        if let Some(callback) = &self.message_callback {
+            let message = StreamMessage::new(
+                self.session_id.clone(),
+                self.active_request.clone(),
+                MessageType::UserInteraction,
+                MessageContent::UserInteraction {
+                    interaction_id: interaction.id.clone(),
+                    interaction_type: format!("{:?}", interaction.interaction_type),
+                    prompt: format!(
+                        "Tool call '{}' has been intercepted for approval: {}",
+                        tool_name,
+                        interaction.prompt
+                    ),
+                    proposal_id: interaction.proposal_id.clone(),
+                    timeout: interaction.timeout_seconds,
+                },
+            );
+
+            callback.on_message(message)?;
+        }
+        Ok(())
+    }
+
     /// Cancel active processing
     pub async fn cancel_active_request(&mut self) -> Result<()> {
         if let Some(request_id) = &self.active_request {
@@ -410,7 +518,7 @@ impl GooseSessionWrapper {
     }
 
     /// Process with Goose agent (placeholder for actual integration)
-    /// This method will be replaced with real Goose agent processing
+    /// This method demonstrates event streaming through the GooseEventBridge
     pub async fn process_with_goose_agent(&mut self, prompt: String) -> Result<String> {
         info!("Processing with Goose agent: {} chars", prompt.len());
 
@@ -422,22 +530,151 @@ impl GooseSessionWrapper {
         // TODO: Replace with actual Goose agent processing
         // This would involve:
         // 1. Sending the prompt to the Goose agent
-        // 2. Handling streaming responses
+        // 2. Handling streaming responses via event bridge
         // 3. Processing tool calls and interactions
         // 4. Returning the final result
 
-        // For now, simulate processing
-        self.send_ai_thinking("Starting Goose agent processing...").await?;
+        // Simulate Goose agent events through the event bridge
+        if let Some(event_bridge) = &self.event_bridge {
+            // Simulate thinking events
+            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
+                text: "Starting Goose agent processing...".to_string(),
+            }).await?;
 
-        // Simulate processing time
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        self.send_ai_thinking("Goose agent has analyzed the prompt and is generating responses...").await?;
+            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
+                text: "Analyzing incident prompt and determining best approach...".to_string(),
+            }).await?;
 
-        // Simulate more processing
-        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
 
-        self.send_ai_thinking("Goose agent processing completed successfully.").await?;
+            // Simulate AI response
+            event_bridge.handle_goose_event(GooseAgentEvent::Message {
+                content: "I'll help you fix these code migration issues. Let me analyze each incident and propose solutions.".to_string(),
+                partial: false,
+                confidence: Some(0.95),
+            }).await?;
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            // T009 - Simulate tool call with actual interception
+            let tool_call_id = "tool-001";
+            let tool_name = "file_read"; // Use read tool first, which should be allowed
+            let tool_params = serde_json::json!({
+                "file_path": "src/example.java",
+                "context_lines": 5
+            });
+
+            // Emit tool call start event
+            event_bridge.handle_goose_event(GooseAgentEvent::ToolCall {
+                id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                parameters: tool_params.clone(),
+                status: crate::goose::monitoring::ToolExecutionStatus::Starting,
+            }).await?;
+
+            // Handle tool call through interception system
+            let tool_result = self.handle_tool_call_event(tool_call_id, tool_name, tool_params).await?;
+
+            match tool_result {
+                crate::goose::agent::GooseToolCallResult::Executed(execution_result) => {
+                    // Tool was allowed and executed
+                    self.send_tool_result(&execution_result).await?;
+
+                    // Emit tool completion event
+                    event_bridge.handle_goose_event(GooseAgentEvent::ToolResult {
+                        call_id: tool_call_id.to_string(),
+                        success: execution_result.success,
+                        result: execution_result.output,
+                        error: execution_result.error,
+                        execution_time_ms: execution_result.execution_time_ms,
+                    }).await?;
+                }
+                crate::goose::agent::GooseToolCallResult::InterceptedForApproval { interaction, .. } => {
+                    // Tool was intercepted for approval
+                    self.send_tool_interception(&interaction, tool_name).await?;
+
+                    // Emit system message about interception
+                    event_bridge.handle_goose_event(GooseAgentEvent::System {
+                        event: "tool_intercepted".to_string(),
+                        status: "pending_approval".to_string(),
+                        metadata: serde_json::json!({
+                            "tool_name": tool_name,
+                            "interaction_id": interaction.id,
+                            "file_path": interaction.proposal_id
+                        }),
+                    }).await?;
+                }
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            // Simulate a file write tool call that will be intercepted
+            let write_tool_id = "tool-002";
+            let write_tool_name = "file_write";
+            let write_params = serde_json::json!({
+                "file_path": "src/example.java",
+                "content": "// Updated code with migration fixes"
+            });
+
+            // Emit tool call start event
+            event_bridge.handle_goose_event(GooseAgentEvent::ToolCall {
+                id: write_tool_id.to_string(),
+                tool_name: write_tool_name.to_string(),
+                parameters: write_params.clone(),
+                status: crate::goose::monitoring::ToolExecutionStatus::Starting,
+            }).await?;
+
+            // Handle write tool call (should be intercepted)
+            let write_result = self.handle_tool_call_event(write_tool_id, write_tool_name, write_params).await?;
+
+            match write_result {
+                crate::goose::agent::GooseToolCallResult::Executed(execution_result) => {
+                    // Shouldn't happen with default config, but handle it
+                    self.send_tool_result(&execution_result).await?;
+
+                    event_bridge.handle_goose_event(GooseAgentEvent::ToolResult {
+                        call_id: write_tool_id.to_string(),
+                        success: execution_result.success,
+                        result: execution_result.output,
+                        error: execution_result.error,
+                        execution_time_ms: execution_result.execution_time_ms,
+                    }).await?;
+                }
+                crate::goose::agent::GooseToolCallResult::InterceptedForApproval { interaction, .. } => {
+                    // Tool was intercepted for approval (expected)
+                    self.send_tool_interception(&interaction, write_tool_name).await?;
+
+                    event_bridge.handle_goose_event(GooseAgentEvent::System {
+                        event: "file_modification_intercepted".to_string(),
+                        status: "awaiting_approval".to_string(),
+                        metadata: serde_json::json!({
+                            "tool_name": write_tool_name,
+                            "interaction_id": interaction.id,
+                            "file_modification": true
+                        }),
+                    }).await?;
+                }
+            }
+
+            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
+                text: "Analysis complete. Generating fix proposals for each incident.".to_string(),
+            }).await?;
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            // Simulate system completion event
+            event_bridge.handle_goose_event(GooseAgentEvent::System {
+                event: "processing_completed".to_string(),
+                status: "success".to_string(),
+                metadata: serde_json::json!({
+                    "incidents_processed": 3,
+                    "fixes_proposed": 3,
+                    "processing_time_ms": 650
+                }),
+            }).await?;
+        }
 
         let result_id = uuid::Uuid::new_v4().to_string();
         info!("Goose agent processing completed: {}", result_id);

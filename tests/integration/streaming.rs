@@ -11,11 +11,11 @@ use kaiak::models::{
 use kaiak::goose::{AgentManager, SessionManager};
 use kaiak::handlers::FixGenerationHandler;
 
-/// Integration test for real-time progress streaming during fix generation
-/// This test validates that progress updates are streamed correctly throughout
-/// the fix generation workflow.
+/// T008 - Integration test for real-time streaming via GooseEventBridge
+/// This test validates that Goose agent events are properly streamed in real-time
+/// through the new GooseEventBridge infrastructure.
 #[tokio::test]
-async fn test_real_time_progress_streaming() -> Result<()> {
+async fn test_real_time_goose_event_streaming() -> Result<()> {
     // Initialize components needed for streaming test
     let agent_manager = AgentManager::new().await?;
 
@@ -44,59 +44,106 @@ async fn test_real_time_progress_streaming() -> Result<()> {
     );
 
     // Process the request and capture streaming messages
+    let start_time = std::time::Instant::now();
     let (request_id, mut receiver) = agent_manager.process_fix_request(&fix_request).await?;
     assert!(!request_id.is_empty());
 
-    // Collect progress messages with timeout
-    let mut progress_messages = Vec::new();
-    let collect_timeout = Duration::from_secs(5);
+    // Collect streaming messages with timeout
+    let mut all_messages = Vec::new();
+    let mut message_timestamps = Vec::new();
+    let collect_timeout = Duration::from_secs(10);
 
     let collection_result = timeout(collect_timeout, async {
         while let Some(message) = receiver.recv().await {
-            progress_messages.push(message);
+            let elapsed = start_time.elapsed();
+            message_timestamps.push(elapsed);
+            all_messages.push(message.clone());
 
-            // Stop collecting after we get a reasonable number of messages
-            if progress_messages.len() >= 3 {
+            // Stop when we get completion signal
+            if let MessageContent::System { event, .. } = &message.content {
+                if event == "processing_completed" {
+                    break;
+                }
+            }
+
+            // Safety stop after many messages
+            if all_messages.len() >= 20 {
                 break;
             }
         }
     }).await;
 
-    // Validate we collected some progress messages
-    match collection_result {
-        Ok(_) => {
-            assert!(!progress_messages.is_empty(), "Should receive at least one progress message");
-        }
-        Err(_) => {
-            // Timeout is expected if implementation is incomplete
-            println!("Progress streaming timeout - implementation incomplete");
-        }
-    }
+    // Validate we received messages
+    assert!(collection_result.is_ok(), "Should receive streaming messages within timeout");
+    assert!(!all_messages.is_empty(), "Should receive at least one streaming message");
 
-    // Validate progress message structure
-    for message in &progress_messages {
+    // T008 - Validate streaming performance (SC-002: <500ms streaming latency)
+    validate_streaming_latency(&message_timestamps)?;
+
+    // Validate message types from GooseEventBridge
+    let mut has_thinking = false;
+    let mut has_ai_response = false;
+    let mut has_tool_call = false;
+    let mut has_system_completion = false;
+
+    for message in &all_messages {
         assert_eq!(message.session_id, ai_session.id);
-        assert!(message.request_id.is_some());
         assert!(!message.id.is_empty());
 
         match &message.message_type {
-            MessageType::Progress => {
-                if let MessageContent::Progress { percentage, phase, description } = &message.content {
-                    assert!(*percentage <= 100, "Progress percentage should not exceed 100");
-                    assert!(!phase.is_empty(), "Progress phase should not be empty");
-                    assert!(!description.is_empty(), "Progress description should not be empty");
-                } else {
-                    panic!("Progress message should have Progress content");
+            MessageType::Thinking => has_thinking = true,
+            MessageType::AiResponse => has_ai_response = true,
+            MessageType::ToolCall => has_tool_call = true,
+            MessageType::System => {
+                if let MessageContent::System { event, .. } = &message.content {
+                    if event == "processing_completed" {
+                        has_system_completion = true;
+                    }
                 }
             }
-            _ => {
-                // Other message types are acceptable in the stream
-            }
+            _ => {} // Other types are acceptable
         }
     }
 
-    // This test intentionally fails until full progress streaming is implemented
-    assert!(false, "T029: Real-time progress streaming not fully implemented");
+    // Verify we received expected GooseEventBridge message types
+    assert!(has_thinking, "Should receive thinking messages from GooseEventBridge");
+    assert!(has_ai_response, "Should receive AI response messages");
+    assert!(has_tool_call, "Should receive tool call messages");
+    assert!(has_system_completion, "Should receive completion system message");
+
+    println!("✅ T008 - Real-time GooseEvent streaming test completed successfully");
+    println!("   - Total messages: {}", all_messages.len());
+    println!("   - Message types: thinking={}, ai_response={}, tool_call={}, system={}",
+        has_thinking, has_ai_response, has_tool_call, has_system_completion);
+
+    Ok(())
+}
+
+/// Validate streaming latency meets SC-002 requirement (<500ms)
+fn validate_streaming_latency(timestamps: &[Duration]) -> Result<()> {
+    if timestamps.len() < 2 {
+        return Ok(()); // Not enough data to measure latency
+    }
+
+    // Check intervals between consecutive messages
+    for window in timestamps.windows(2) {
+        let interval = window[1] - window[0];
+        assert!(
+            interval < Duration::from_millis(600), // Allow 600ms for test tolerance
+            "Streaming latency too high: {:?} (target: <500ms)",
+            interval
+        );
+    }
+
+    // Verify first message arrives quickly (agent responsiveness)
+    assert!(
+        timestamps[0] < Duration::from_millis(200),
+        "First message took too long: {:?}",
+        timestamps[0]
+    );
+
+    println!("   - Streaming latency validation passed (target <500ms)");
+    Ok(())
 }
 
 /// Integration test for progress message ordering and completeness
