@@ -20,6 +20,9 @@ pub enum KaiakError {
     #[error("Session error: {message}")]
     Session { message: String, session_id: Option<String> },
 
+    #[error("Session not found: {0}")]
+    SessionNotFound(String),
+
     #[error("Agent error: {message}")]
     Agent { message: String, context: Option<String> },
 
@@ -28,6 +31,15 @@ pub enum KaiakError {
 
     #[error("Workspace error: {message}")]
     Workspace { message: String, path: Option<String> },
+
+    #[error("Invalid workspace path: {0}")]
+    InvalidWorkspacePath(String),
+
+    #[error("Resource exhausted: {0}")]
+    ResourceExhausted(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 
     #[error("IO error: {source}")]
     Io {
@@ -86,9 +98,13 @@ impl KaiakError {
         match self {
             KaiakError::Configuration { .. } => -32014,
             KaiakError::Session { .. } => -32003,
+            KaiakError::SessionNotFound(_) => -32003,
             KaiakError::Agent { .. } => -32006,
             KaiakError::Transport { .. } => -32001,
             KaiakError::Workspace { .. } => -32002,
+            KaiakError::InvalidWorkspacePath(_) => -32002,
+            KaiakError::ResourceExhausted(_) => -32015,
+            KaiakError::Internal(_) => -32603,
             KaiakError::Io { .. } => -32603,
             KaiakError::Serialization { .. } => -32700,
         }
@@ -107,6 +123,9 @@ impl KaiakError {
                     format!("Session error: {}", message)
                 }
             }
+            KaiakError::SessionNotFound(id) => {
+                format!("Session not found: {}", id)
+            }
             KaiakError::Agent { message, .. } => {
                 format!("AI agent error: {}", message)
             }
@@ -119,6 +138,15 @@ impl KaiakError {
                 } else {
                     format!("Workspace error: {}", message)
                 }
+            }
+            KaiakError::InvalidWorkspacePath(path) => {
+                format!("Invalid workspace path: {}", path)
+            }
+            KaiakError::ResourceExhausted(message) => {
+                format!("Resource limit exceeded: {}", message)
+            }
+            KaiakError::Internal(message) => {
+                format!("Internal error: {}", message)
             }
             KaiakError::Io { source } => {
                 format!("File system error: {}", source)

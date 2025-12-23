@@ -4,3 +4,5 @@ pub mod streaming;
 pub mod ai_streaming;
 pub mod approval;
 pub mod interaction_timeout;
+pub mod lifecycle;
+pub mod error_recovery;

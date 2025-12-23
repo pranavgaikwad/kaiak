@@ -7,10 +7,14 @@ use crate::models::{Id, AiSession};
 pub mod agent;
 pub mod session;
 pub mod prompts;
+pub mod monitoring;
+pub mod resources;
 
 pub use agent::*;
 pub use session::*;
 pub use prompts::*;
+pub use monitoring::*;
+pub use resources::*;
 
 /// Manager for Goose agent sessions with thread-safe access
 #[derive(Clone)]

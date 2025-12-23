@@ -84,3 +84,43 @@ impl AiSession {
         matches!(self.status, SessionStatus::Ready | SessionStatus::Processing)
     }
 }
+
+/// Session model used by User Story 4 lifecycle management
+/// Simpler than AiSession for better separation of concerns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: Id,
+    pub goose_session_id: String,
+    pub status: SessionStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub configuration: SessionConfiguration,
+    pub active_request_id: Option<Id>,
+    pub message_count: u32,
+    pub error_count: u32,
+}
+
+impl Session {
+    pub fn new(workspace_path: String, session_name: Option<String>) -> Self {
+        let now = chrono::Utc::now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            goose_session_id: uuid::Uuid::new_v4().to_string(),
+            status: SessionStatus::Created,
+            created_at: now,
+            updated_at: now,
+            configuration: SessionConfiguration {
+                workspace_path,
+                session_name,
+                provider: None,
+                model: None,
+                timeout: None,
+                max_turns: None,
+                custom: Metadata::new(),
+            },
+            active_request_id: None,
+            message_count: 0,
+            error_count: 0,
+        }
+    }
+}

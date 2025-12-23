@@ -1,0 +1,76 @@
+
+# Feature Development History 
+
+## Initial commits using speckit
+
+- 1. Begin research
+      I added a project Goose to your context under ~/Projects/goose/. This is cloned from 
+      `https://github.com/block/goose`. It is an open source AI agent which is highly customizable and flexible
+      specifically designed for general purpose coding. I also added another directory
+      ~/Projects/editor-extensions/vscode/core which is a vscode extension we developed that helps users modernize /
+      migrate their source code to newer technologies using AI agents. The IDE extension uses a static source code
+      analysis tool to analyze the source code in open workspace and displays migration issues. Each occurrence of a
+      migration issue in the source code is referred to as an incident. The users then select either - 1 specific
+      occurrence of an issue (i.e. an incident) in a file or all issues in 1 file or multiple occurrences (i.e.
+      incidents) of 1 issue across different files. The IDE then passes this data to an external module agentic/. YOu
+      have access to the source code of agentic/ module under ~/Projects/editor-extensions/agentic/. Common apis are
+      available under the shared/ module which is added to the context too. The agentic/ module implements a LangGraph
+      agent which communicates with the vscode/core extension. vscode/core itself manages the state of the agentic
+      workflow and communicates with the webview. The AI messages are displayed in the webview in a chat format. The AI
+      workflow itself is not allowed to make any file changes directly. Instead it sends a special kind of message to
+      the user and *waits* until a user interaction is resolved. The source code for the webview is under ~/Projects/editor-extensions/webview-ui/.
+      We want to replace the agentic/ module with Goose Agent. Your job is to carefully understand the code in agentic/,
+      vscode/core, webview-ui/ and understand how they all work together. You will then look at the Goose agent's source
+      code and understand how it works and what public APIs it exposes. If we were to replace the agentic/ module with Goose Agent,
+      is it possible to bring in Goose as a dependency? How could we integrate Goose if it does provide public APIs? 
+      Understand the features of our IDE extension right now and evaluate whether all features are possible with Goose agent. 
+      For instance, streaming differente types of messages, waiting for user interaction in the UI, displaying thinking steps,
+      We are not interested in having a general purpose code assistane. We want to have a controlled experience specifically
+      solving the problem of modernizing / migrating source code to newer technologies using AI agents. Therefore, it is 
+      is important that the underlying agent we use is flexible in that we can change the prompts, modify / add new tools. 
+      We do not want to make any code changes just yet. Lets only focus on talking out a design. 
+
+- 2. Run speckit.constitution to establish baseline
+      Now that you know about the problem statement, lets start working on this Rust server
+      which we will call "kaiak" moving forward. Let's focus on coding standards, code quality,
+      testing standards, and most importantly, user experience consistency. It is incredibly important
+      that our user experience is friendly - it is easy to debug, progress is shown at times when tasks
+      are long running, errors are communicated well, logging is in place. We will use Github actions for 
+      CI and will have actions running on pull requests running tests. For testing, we will prioritize 
+      e2e / integration tests over smaller unit tests etc. For complex functions or important business logic
+      part of source code still can benefit from more granular unit testing. Comments in the source code should
+      only be added for complex functions, important parts of the source code - unnecessary verbose comments
+      for trivial things should be avoided.
+
+- 3. Run speckit.specify to establish spec for the first skeleton feature
+      Lets begin building the skeleton for our server "kaiak". Kaiak will be a standalone server capable of running the Goose agent. Kaiak will be able to do the following:
+
+      1. accepts fix generation requests from IDE extension for one or more incidents in the workspace 
+      2. runs the Goose AI agent with customized prompts and / or tools. The information about incidents
+         will be used to construct prompts that will be passed to the agent
+      3. manages the agent's lifecycle
+      4. streams AI messages back to the IDE  
+      5. takes user inputs from the IDE's webview through  user interactions for tool calls, file modification requests etc
+
+      The Goose AI agent will perform the actual work. With Kaiak, our focus is to enable migration use cases leveraging Goose. We are not targeting a general-purpose coding assistant. Therefore, our IDE extension should provide a controlled approach to performing migrations through Goose. We will use information from static analysis tools to identify migration issues and integrate that data into prompts. Consequently, we will use our own custom prompts. We will configure tools for the Goose agent. We will stream messages back to the user. A critical requirement is that we will not allow Goose to make file changes. Note that the agentic module used a ModifiedFile message type to explicitly show file modification information to the user and request confirmation. Additionally, we will stream tool calls, the thinking process, and all AI messages back to the user. 
+- 4. Run speckit.plan to generate a technical plan
+
+      Kaiak will be a standalone server written in Rust. It will consume `Goose (github.com/block/goose)` as
+       a dependency and consume its public APIs to create, manage and run Goose AI agent. Kaiak will use LSP style JSON-RPC 
+      messages (with contentlength, type) over sockets / named pipes or optionally, stdio to communicate with clients (e.g. 
+      IDE). If possible, Kaiak can be distributed as a wasm binary or a binary. It will use github actions to implement CI 
+      to gate PRs as well as have local scripts to run the same CI as much as possible. We will prioritize e2e/integration 
+      tests over unit tests or smaller isolated tests. Kaiak will keep dependencies to the minimum but will also not 
+      re-invent the wheel for things such as socket communication, JSON-RPC implemenation that is compatible with vscodes 
+      json rpc, etc.
+
+- 5. Run speckit.tasks
+
+- 6. Run speckit.analyze
+
+- 7. Run speckit.implement
+
+
+### Follow up fixes / addressing review
+
+- 

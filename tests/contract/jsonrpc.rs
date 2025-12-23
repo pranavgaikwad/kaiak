@@ -563,3 +563,166 @@ pub fn create_valid_fix_request(session_id: &str) -> Value {
         "id": 2
     })
 }
+
+#[cfg(test)]
+mod session_lifecycle_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_session_terminate_endpoint_contract() {
+        // T048: Test kaiak/session/terminate endpoint according to API spec
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/session/terminate",
+            "params": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "id": 2
+        });
+
+        // Expected response structure according to API contract:
+        let expected_response_structure = json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "terminated",
+                "message_count": 15,
+                "terminated_at": "2025-12-22T11:00:00Z"
+            },
+            "id": 2
+        });
+
+        // Validate request structure
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "kaiak/session/terminate");
+        assert!(request["params"]["session_id"].is_string());
+        assert!(request["id"].is_number());
+
+        // This test intentionally fails until implementation is complete
+        assert!(false, "T048: Session terminate contract test not yet implemented");
+    }
+
+    #[tokio::test]
+    async fn test_session_status_endpoint_contract() {
+        // T048: Test kaiak/session/status endpoint according to API spec
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/session/status",
+            "params": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "id": 6
+        });
+
+        // Expected response structure according to API contract:
+        let expected_response_structure = json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": "processing",
+                "active_request_id": "req-550e8400-e29b-41d4-a716-446655440001",
+                "message_count": 8,
+                "error_count": 0,
+                "created_at": "2025-12-22T10:30:00Z",
+                "updated_at": "2025-12-22T10:44:00Z"
+            },
+            "id": 6
+        });
+
+        // Validate request structure
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "kaiak/session/status");
+        assert!(request["params"]["session_id"].is_string());
+        assert!(request["id"].is_number());
+
+        // This test intentionally fails until implementation is complete
+        assert!(false, "T048: Session status contract test not yet implemented");
+    }
+
+    #[tokio::test]
+    async fn test_fix_cancel_endpoint_contract() {
+        // T048: Test kaiak/fix/cancel endpoint according to API spec
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/fix/cancel",
+            "params": {
+                "request_id": "req-550e8400-e29b-41d4-a716-446655440001"
+            },
+            "id": 4
+        });
+
+        // Expected response structure according to API contract:
+        let expected_response_structure = json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "request_id": "req-550e8400-e29b-41d4-a716-446655440001",
+                "status": "cancelled",
+                "cancelled_at": "2025-12-22T10:40:00Z"
+            },
+            "id": 4
+        });
+
+        // Validate request structure
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "kaiak/fix/cancel");
+        assert!(request["params"]["request_id"].is_string());
+        assert!(request["id"].is_number());
+
+        // This test intentionally fails until implementation is complete
+        assert!(false, "T048: Fix cancel contract test not yet implemented");
+    }
+
+    #[tokio::test]
+    async fn test_session_lifecycle_error_cases() {
+        // T048: Test error cases for session lifecycle management
+
+        // Session not found should return -32003
+        let request_invalid_session = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/session/terminate",
+            "params": {
+                "session_id": "nonexistent-session-id"
+            },
+            "id": 10
+        });
+
+        // Session already terminated should return -32004
+        let request_already_terminated = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/session/terminate",
+            "params": {
+                "session_id": "terminated-session-id"
+            },
+            "id": 11
+        });
+
+        // Request not found should return -32007
+        let request_invalid_fix_request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/fix/cancel",
+            "params": {
+                "request_id": "nonexistent-request-id"
+            },
+            "id": 12
+        });
+
+        // Expected error response structure:
+        let expected_error_structure = json!({
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32003, // SESSION_NOT_FOUND
+                "message": "Session not found",
+                "data": {
+                    "session_id": "nonexistent-session-id"
+                }
+            },
+            "id": 10
+        });
+
+        // TODO: Test actual error responses once session lifecycle handlers are implemented
+        assert!(false, "T048: Session lifecycle error cases not yet implemented");
+    }
+}
