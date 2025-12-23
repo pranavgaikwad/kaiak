@@ -1,0 +1,581 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Kaiak Agent Implementation API",
+    "description": "JSON-RPC API for Goose Agent integration in Kaiak system",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Kaiak Team"
+    },
+    "license": {
+      "name": "MIT OR Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "stdio://",
+      "description": "Standard input/output transport (enterprise-safe)"
+    },
+    {
+      "url": "unix:///tmp/kaiak.sock",
+      "description": "Unix domain socket transport (enterprise-safe)"
+    }
+  ],
+  "paths": {
+    "/kaiak/session/create": {
+      "post": {
+        "summary": "Create new agent session",
+        "description": "Initialize a new agent processing session with configuration",
+        "operationId": "createAgentSession",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kaiak/session/status": {
+      "post": {
+        "summary": "Get session status",
+        "description": "Retrieve current status and metadata for an agent session",
+        "operationId": "getSessionStatus",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session status retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kaiak/fix/generate": {
+      "post": {
+        "summary": "Generate fix for incidents",
+        "description": "Process incidents through Goose agent with real-time streaming",
+        "operationId": "generateFix",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateFixRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fix generation started, streaming responses via notifications",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateFixResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kaiak/fix/cancel": {
+      "post": {
+        "summary": "Cancel ongoing fix generation",
+        "description": "Terminate active agent processing",
+        "operationId": "cancelFix",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelFixRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fix generation cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelFixResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kaiak/interaction/respond": {
+      "post": {
+        "summary": "Respond to agent interaction request",
+        "description": "Provide user input for agent interaction (approval, choice, etc.)",
+        "operationId": "respondToInteraction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InteractionResponse"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Interaction response processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionAckResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kaiak/session/terminate": {
+      "post": {
+        "summary": "Terminate agent session",
+        "description": "Cleanly shut down agent session and release resources",
+        "operationId": "terminateSession",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session terminated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminateSessionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateSessionRequest": {
+        "type": "object",
+        "required": ["workspace_path", "incidents"],
+        "properties": {
+          "workspace_path": {
+            "type": "string",
+            "description": "Absolute path to workspace directory"
+          },
+          "incidents": {
+            "type": "array",
+            "description": "List of incidents to process",
+            "items": {
+              "$ref": "#/components/schemas/Incident"
+            },
+            "minItems": 1
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/SessionConfiguration"
+          }
+        }
+      },
+      "CreateSessionResponse": {
+        "type": "object",
+        "required": ["session_id", "status"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique session identifier"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "goose_session_id": {
+            "type": "string",
+            "description": "Associated Goose session ID"
+          }
+        }
+      },
+      "SessionStatusRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SessionStatusResponse": {
+        "type": "object",
+        "required": ["session_id", "status", "created_at"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "token_usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "files_modified": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of files modified during processing"
+          }
+        }
+      },
+      "GenerateFixRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GenerateFixResponse": {
+        "type": "object",
+        "required": ["request_id", "status"],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique request identifier for tracking"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["started"],
+            "description": "Processing status"
+          },
+          "stream_id": {
+            "type": "string",
+            "description": "Stream identifier for real-time updates"
+          }
+        }
+      },
+      "CancelFixRequest": {
+        "type": "object",
+        "required": ["session_id", "request_id"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CancelFixResponse": {
+        "type": "object",
+        "required": ["cancelled"],
+        "properties": {
+          "cancelled": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Cancellation reason if applicable"
+          }
+        }
+      },
+      "InteractionResponse": {
+        "type": "object",
+        "required": ["interaction_id", "response"],
+        "properties": {
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "response": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["type", "approved"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["approval"]
+                  },
+                  "approved": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["type", "choice"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["choice"]
+                  },
+                  "choice": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["type", "input"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["input"]
+                  },
+                  "input": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "InteractionAckResponse": {
+        "type": "object",
+        "required": ["processed"],
+        "properties": {
+          "processed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TerminateSessionRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional termination reason"
+          }
+        }
+      },
+      "TerminateSessionResponse": {
+        "type": "object",
+        "required": ["terminated"],
+        "properties": {
+          "terminated": {
+            "type": "boolean"
+          },
+          "final_status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          }
+        }
+      },
+      "Incident": {
+        "type": "object",
+        "required": ["id", "rule_id", "file_path", "line_number", "severity", "description", "message", "category"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique incident identifier"
+          },
+          "rule_id": {
+            "type": "string",
+            "description": "Rule that triggered this incident"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "File path relative to workspace"
+          },
+          "line_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Line number in file"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable incident description"
+          },
+          "message": {
+            "type": "string",
+            "description": "Detailed incident message"
+          },
+          "category": {
+            "type": "string",
+            "description": "Incident classification category"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional incident metadata",
+            "additionalProperties": true
+          }
+        }
+      },
+      "SessionConfiguration": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "LLM provider (openai, anthropic, etc.)",
+            "default": "openai"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model name (gpt-4, claude-3, etc.)",
+            "default": "gpt-4"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 3600,
+            "default": 300,
+            "description": "Session timeout in seconds"
+          },
+          "max_turns": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum conversation turns"
+          },
+          "enable_tool_interception": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable file modification approval workflow"
+          }
+        }
+      },
+      "SessionStatus": {
+        "type": "string",
+        "enum": [
+          "created",
+          "initializing",
+          "ready",
+          "processing",
+          "completed",
+          "failed",
+          "terminated"
+        ],
+        "description": "Current session status"
+      },
+      "Severity": {
+        "type": "string",
+        "enum": ["error", "warning", "info"],
+        "description": "Incident severity level"
+      },
+      "TokenUsage": {
+        "type": "object",
+        "required": ["input_tokens", "output_tokens", "total_tokens"],
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Error code for programmatic handling"
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message"
+              },
+              "details": {
+                "type": "string",
+                "description": "Additional error context"
+              },
+              "recoverable": {
+                "type": "boolean",
+                "description": "Whether the error is recoverable"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

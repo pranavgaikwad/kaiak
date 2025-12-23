@@ -1,0 +1,413 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Kaiak Agent Streaming Notifications",
+    "description": "Real-time streaming notification schemas for agent processing events",
+    "version": "0.1.0",
+    "contact": {
+      "name": "Kaiak Team"
+    },
+    "license": {
+      "name": "MIT OR Apache-2.0"
+    }
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "StreamNotification": {
+        "type": "object",
+        "required": ["method", "params"],
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "Notification method identifier",
+            "enum": [
+              "kaiak/stream/progress",
+              "kaiak/stream/ai_response",
+              "kaiak/stream/tool_call",
+              "kaiak/stream/thinking",
+              "kaiak/stream/user_interaction",
+              "kaiak/stream/file_modification",
+              "kaiak/stream/error",
+              "kaiak/stream/system"
+            ]
+          },
+          "params": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProgressNotification"
+              },
+              {
+                "$ref": "#/components/schemas/AiResponseNotification"
+              },
+              {
+                "$ref": "#/components/schemas/ToolCallNotification"
+              },
+              {
+                "$ref": "#/components/schemas/ThinkingNotification"
+              },
+              {
+                "$ref": "#/components/schemas/UserInteractionNotification"
+              },
+              {
+                "$ref": "#/components/schemas/FileModificationNotification"
+              },
+              {
+                "$ref": "#/components/schemas/ErrorNotification"
+              },
+              {
+                "$ref": "#/components/schemas/SystemNotification"
+              }
+            ]
+          }
+        }
+      },
+      "ProgressNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "percentage", "phase", "description"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "percentage": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Progress percentage"
+          },
+          "phase": {
+            "type": "string",
+            "description": "Current processing phase",
+            "examples": ["initializing", "analyzing", "processing_incidents", "applying_fixes", "completing"]
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable progress description"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AiResponseNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "text", "partial"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "description": "AI response text (may be partial)"
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "Whether this is a partial response"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Response confidence score"
+          },
+          "token_usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ToolCallNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "tool_call_id", "tool_name", "operation"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "Name of tool being executed"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ToolOperation"
+          },
+          "parameters": {
+            "type": "object",
+            "description": "Tool parameters",
+            "additionalProperties": true
+          },
+          "result": {
+            "$ref": "#/components/schemas/ToolResult"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ThinkingNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "text"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string",
+            "description": "Agent thinking content"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserInteractionNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "interaction_id", "interaction_type", "prompt"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interaction_type": {
+            "$ref": "#/components/schemas/InteractionType"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Interaction prompt for user"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Available choices for selection interactions"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Interaction timeout in seconds"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FileModificationNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "proposal_id", "file_path", "change_type"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Path to file being modified"
+          },
+          "change_type": {
+            "$ref": "#/components/schemas/ChangeType"
+          },
+          "original_content": {
+            "type": "string",
+            "description": "Original file content"
+          },
+          "proposed_content": {
+            "type": "string",
+            "description": "Proposed file content"
+          },
+          "approval_required": {
+            "type": "boolean",
+            "default": true
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ErrorNotification": {
+        "type": "object",
+        "required": ["session_id", "request_id", "error_code", "message"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "error_code": {
+            "type": "string",
+            "description": "Error code for programmatic handling"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message"
+          },
+          "details": {
+            "type": "string",
+            "description": "Additional error context"
+          },
+          "recoverable": {
+            "type": "boolean",
+            "description": "Whether the error is recoverable"
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Associated incident ID if applicable"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Associated tool call ID if applicable"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SystemNotification": {
+        "type": "object",
+        "required": ["session_id", "event", "status"],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event": {
+            "type": "string",
+            "description": "System event type",
+            "examples": ["session_created", "session_terminated", "processing_started", "processing_completed"]
+          },
+          "status": {
+            "type": "string",
+            "description": "Event status"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional event metadata",
+            "additionalProperties": true
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ToolOperation": {
+        "type": "string",
+        "enum": ["start", "progress", "complete", "error"],
+        "description": "Tool execution operation type"
+      },
+      "ToolResult": {
+        "type": "object",
+        "required": ["success"],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "description": "Tool execution result data",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if execution failed"
+          },
+          "execution_time_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Execution time in milliseconds"
+          },
+          "output_size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Size of output data in bytes"
+          }
+        }
+      },
+      "InteractionType": {
+        "type": "string",
+        "enum": ["approval", "choice", "input"],
+        "description": "User interaction type"
+      },
+      "ChangeType": {
+        "type": "string",
+        "enum": ["create", "modify", "delete", "rename"],
+        "description": "File modification type"
+      },
+      "TokenUsage": {
+        "type": "object",
+        "required": ["input_tokens", "output_tokens", "total_tokens"],
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
