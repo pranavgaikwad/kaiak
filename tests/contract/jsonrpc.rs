@@ -348,6 +348,186 @@ mod streaming_notification_tests {
     }
 }
 
+#[cfg(test)]
+mod user_interaction_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_user_interaction_response_endpoint_contract() {
+        // Test kaiak/interaction/respond endpoint according to API spec
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/interaction/respond",
+            "params": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "interaction_id": "interaction-12345",
+                "response_type": "approval",
+                "response_data": {
+                    "approved": true,
+                    "comment": "Looks good, apply the fix"
+                },
+                "timestamp": "2025-12-22T10:40:00Z"
+            },
+            "id": 6
+        });
+
+        // Expected response structure according to API contract:
+        let expected_response_structure = json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "interaction_id": "interaction-12345",
+                "status": "processed",
+                "processed_at": "2025-12-22T10:40:01Z"
+            },
+            "id": 6
+        });
+
+        // Validate request structure
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "kaiak/interaction/respond");
+        assert!(request["params"]["session_id"].is_string());
+        assert!(request["params"]["interaction_id"].is_string());
+        assert!(request["params"]["response_type"].is_string());
+        assert!(request["params"]["response_data"].is_object());
+        assert!(request["id"].is_number());
+
+        // This test intentionally fails until implementation is complete
+        assert!(false, "T038: User interaction response contract test not yet implemented");
+    }
+
+    #[tokio::test]
+    async fn test_file_modification_proposal_endpoint_contract() {
+        // Test kaiak/proposal/get endpoint for retrieving file modification proposals
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/proposal/get",
+            "params": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "proposal_id": "proposal-67890"
+            },
+            "id": 7
+        });
+
+        // Expected response structure according to API contract:
+        let expected_response_structure = json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "proposal_id": "proposal-67890",
+                "file_path": "src/main.rs",
+                "modification_type": "content_replace",
+                "original_content": "fn old_method() { ... }",
+                "proposed_content": "fn new_method() { ... }",
+                "description": "Replace deprecated method with new implementation",
+                "line_range": {
+                    "start": 42,
+                    "end": 45
+                },
+                "created_at": "2025-12-22T10:39:30Z",
+                "expires_at": "2025-12-22T10:44:30Z"
+            },
+            "id": 7
+        });
+
+        // Validate request structure
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "kaiak/proposal/get");
+        assert!(request["params"]["session_id"].is_string());
+        assert!(request["params"]["proposal_id"].is_string());
+        assert!(request["id"].is_number());
+
+        // This test intentionally fails until implementation is complete
+        assert!(false, "T038: File modification proposal contract test not yet implemented");
+    }
+
+    #[tokio::test]
+    async fn test_interaction_timeout_endpoint_contract() {
+        // Test kaiak/interaction/timeout endpoint for handling expired interactions
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/interaction/timeout",
+            "params": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "interaction_id": "interaction-timeout-test",
+                "timeout_reason": "user_inactive"
+            },
+            "id": 8
+        });
+
+        // Expected response structure according to API contract:
+        let expected_response_structure = json!({
+            "jsonrpc": "2.0",
+            "result": {
+                "interaction_id": "interaction-timeout-test",
+                "status": "timeout_processed",
+                "default_action": "deny",
+                "processed_at": "2025-12-22T10:45:00Z"
+            },
+            "id": 8
+        });
+
+        // Validate request structure
+        assert_eq!(request["jsonrpc"], "2.0");
+        assert_eq!(request["method"], "kaiak/interaction/timeout");
+        assert!(request["params"]["session_id"].is_string());
+        assert!(request["params"]["interaction_id"].is_string());
+        assert!(request["params"]["timeout_reason"].is_string());
+        assert!(request["id"].is_number());
+
+        // This test intentionally fails until implementation is complete
+        assert!(false, "T038: Interaction timeout contract test not yet implemented");
+    }
+
+    #[tokio::test]
+    async fn test_user_interaction_error_cases() {
+        // Test various error cases for user interaction endpoints
+
+        // Invalid interaction ID should return -32004
+        let invalid_interaction_request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/interaction/respond",
+            "params": {
+                "session_id": "valid-session-id",
+                "interaction_id": "nonexistent-interaction",
+                "response_type": "approval",
+                "response_data": {"approved": false}
+            },
+            "id": 9
+        });
+
+        // Expired interaction should return -32005
+        let expired_interaction_request = json!({
+            "jsonrpc": "2.0",
+            "method": "kaiak/interaction/respond",
+            "params": {
+                "session_id": "valid-session-id",
+                "interaction_id": "expired-interaction-123",
+                "response_type": "approval",
+                "response_data": {"approved": true}
+            },
+            "id": 10
+        });
+
+        // Expected error response structure:
+        let expected_error_structure = json!({
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32004, // INTERACTION_NOT_FOUND
+                "message": "Interaction not found",
+                "data": {
+                    "interaction_id": "nonexistent-interaction"
+                }
+            },
+            "id": 9
+        });
+
+        // TODO: Test actual error responses once interaction handlers are implemented
+        assert!(false, "T038: User interaction error cases not yet implemented");
+    }
+}
+
 /// Test helper to create a valid session creation request
 pub fn create_valid_session_request(workspace_path: &str) -> Value {
     json!({
