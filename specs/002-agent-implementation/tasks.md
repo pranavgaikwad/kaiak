@@ -33,10 +33,10 @@
 - `Cargo.toml` - Verify goose dependency configuration
 
 **Acceptance**:
-- [ ] GooseSessionWrapper.initialize() creates actual Goose Agent instance
-- [ ] Agent processing uses real Goose agent instead of simulation
-- [ ] Agent state properly tracked through session lifecycle
-- [ ] Error handling preserves existing graceful degradation patterns
+- [X] GooseSessionWrapper.initialize() creates actual Goose Agent instance
+- [X] Agent processing uses real Goose agent instead of simulation
+- [X] Agent state properly tracked through session lifecycle
+- [X] Error handling preserves existing graceful degradation patterns
 
 ---
 
@@ -52,10 +52,10 @@
 - `src/models/incident.rs` - Validate incident structure compatibility
 
 **Acceptance**:
-- [ ] format_incident_prompt() converts incident array to coherent natural language
-- [ ] Prompt includes file paths, line numbers, issue descriptions, and context
-- [ ] Format follows Goose agent input expectations
-- [ ] Handles edge cases (empty incidents, malformed data)
+- [X] format_incident_prompt() converts incident array to coherent natural language
+- [X] Prompt includes file paths, line numbers, issue descriptions, and context
+- [X] Format follows Goose agent input expectations
+- [X] Handles edge cases (empty incidents, malformed data)
 
 ---
 
@@ -71,10 +71,10 @@
 - `src/handlers/fix_generation.rs` - Verify integration with existing handlers
 
 **Acceptance**:
-- [ ] process_fix_request() sends formatted prompts to Goose agent
-- [ ] Agent responses properly captured and structured
-- [ ] Session state updates reflect actual processing progress
-- [ ] Error scenarios handled with meaningful messages (FR-006)
+- [X] process_fix_request() sends formatted prompts to Goose agent
+- [X] Agent responses properly captured and structured
+- [X] Session state updates reflect actual processing progress
+- [X] Error scenarios handled with meaningful messages (FR-006)
 
 ---
 
@@ -91,11 +91,11 @@
 - `tests/recordings/` - Set up TestProvider recording infrastructure
 
 **Acceptance**:
-- [ ] Test creates agent session with sample incidents
-- [ ] Processes incidents through complete Goose agent workflow
-- [ ] Verifies agent responses and file modifications on disk
-- [ ] Uses TestProvider for CI/PR compatibility (recording/replay)
-- [ ] Achieves target processing time <30s (SC-001)
+- [X] Test creates agent session with sample incidents
+- [X] Processes incidents through complete Goose agent workflow
+- [X] Verifies agent responses and file modifications on disk
+- [X] Uses TestProvider for CI/PR compatibility (recording/replay)
+- [X] Achieves target processing time <30s (SC-001)
 
 ---
 

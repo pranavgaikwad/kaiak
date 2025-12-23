@@ -243,7 +243,13 @@ impl AgentManager {
 
             let result = {
                 let mut session = session_clone.write().await;
-                session.process_fix_request(&request_clone).await
+                // Convert incidents to prompt and send to Goose agent (T003 - Wire Agent Processing Pipeline)
+                let prompt = crate::goose::PromptBuilder::format_incident_prompt(&request_clone.incidents, "");
+                let agent_result = session.process_with_goose_agent(prompt).await;
+                match agent_result {
+                    Ok(_) => session.process_fix_request(&request_clone).await,
+                    Err(e) => Err(e),
+                }
             };
 
             // Update request status

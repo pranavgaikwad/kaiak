@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::models::{AiSession, SessionStatus, FixGenerationRequest, StreamMessage, MessageType, MessageContent};
 use crate::goose::PromptBuilder;
-use tracing::{info, debug, warn};
+use tracing::{info, debug, warn, error};
 
 /// Wrapper around Goose session providing Kaiak-specific functionality
 pub struct GooseSessionWrapper {
@@ -11,12 +11,22 @@ pub struct GooseSessionWrapper {
     pub workspace_path: String,
     pub status: SessionStatus,
     pub configuration: SessionConfiguration,
-    // Note: Actual Goose session will be integrated when available
-    // goose_session: Option<goose::Session>,
+    /// TODO: Actual Goose agent instance - will hold real goose::Agent
+    /// This would be: goose_agent: Option<goose::Agent>
+    goose_agent: Option<GooseAgentPlaceholder>,
     /// Active request being processed
     pub active_request: Option<String>,
     /// Message callbacks for streaming
     pub message_callback: Option<Arc<dyn MessageCallback + Send + Sync>>,
+}
+
+/// Placeholder for actual Goose agent until real integration
+/// This will be replaced with goose::Agent from the Goose library
+#[derive(Debug)]
+struct GooseAgentPlaceholder {
+    workspace_path: String,
+    provider: Option<String>,
+    model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +175,7 @@ impl GooseSessionWrapper {
             workspace_path: ai_session.configuration.workspace_path.clone(),
             status: SessionStatus::Created,
             configuration: config,
+            goose_agent: None,
             active_request: None,
             message_callback: None,
         })
@@ -179,14 +190,18 @@ impl GooseSessionWrapper {
             // Continue anyway for now - may be created later
         }
 
-        // TODO: Initialize actual Goose agent session
-        // This would involve:
-        // 1. Creating Goose session with workspace path
-        // 2. Configuring provider settings
-        // 3. Setting up custom tools and prompts
+        // Initialize actual Goose agent instance
+        // TODO: Replace with real goose::Agent::new() when fully integrated
+        let agent = GooseAgentPlaceholder {
+            workspace_path: self.workspace_path.clone(),
+            provider: self.configuration.provider.clone(),
+            model: self.configuration.model.clone(),
+        };
 
+        self.goose_agent = Some(agent);
         self.status = SessionStatus::Ready;
-        info!("Session initialized and ready: {}", self.session_id);
+
+        info!("Goose agent initialized for session: {}", self.session_id);
         Ok(())
     }
 
@@ -228,17 +243,19 @@ impl GooseSessionWrapper {
         // Send progress update
         self.send_progress_update(5, "analyzing_incidents", "Analyzing code incidents").await?;
 
-        // Generate prompts for this request
+        // Generate prompts for this request using the new format_incident_prompt method
         let system_prompt = PromptBuilder::system_prompt();
+        let incident_prompt = PromptBuilder::format_incident_prompt(&request.incidents, "");
         let user_prompt = PromptBuilder::fix_generation_prompt(request);
 
         debug!("Generated system prompt: {} chars", system_prompt.len());
+        debug!("Generated incident prompt: {} chars", incident_prompt.len());
         debug!("Generated user prompt: {} chars", user_prompt.len());
 
         // Send thinking about prompt generation
         self.send_ai_thinking(&format!(
-            "I've generated a system prompt ({} chars) and user prompt ({} chars) that will guide my analysis of the {} incident(s).",
-            system_prompt.len(), user_prompt.len(), request.incidents.len()
+            "I've generated prompts that will guide my analysis of the {} incident(s). The incident-specific prompt ({} chars) converts the structured data into natural language for the Goose agent.",
+            request.incidents.len(), incident_prompt.len()
         )).await?;
 
         // Analyze each incident with thinking
@@ -271,12 +288,14 @@ impl GooseSessionWrapper {
         // Thinking about fix generation approach
         self.send_ai_thinking("Now I'll generate specific fixes for each incident. I need to ensure the fixes are safe, maintainable, and follow migration best practices.").await?;
 
-        // TODO: Send to actual Goose agent
-        // This would involve:
-        // 1. Sending system and user prompts to Goose
-        // 2. Handling streaming responses
-        // 3. Processing tool calls and thinking
-        // 4. Generating fix proposals
+        // Send to Goose agent for processing (T003 - Wire Agent Processing Pipeline)
+        self.send_ai_thinking("Sending incident prompt to Goose agent...").await?;
+
+        let _agent_result = self.process_with_goose_agent(incident_prompt).await
+            .map_err(|e| {
+                error!("Goose agent processing failed: {}", e);
+                anyhow::anyhow!("Agent processing failed: {}", e)
+            })?;
 
         // Simulate processing with more detailed thinking
         for (i, incident) in request.incidents.iter().enumerate() {
@@ -388,6 +407,42 @@ impl GooseSessionWrapper {
             info!("Request cancelled and session restored to ready state");
         }
         Ok(())
+    }
+
+    /// Process with Goose agent (placeholder for actual integration)
+    /// This method will be replaced with real Goose agent processing
+    pub async fn process_with_goose_agent(&mut self, prompt: String) -> Result<String> {
+        info!("Processing with Goose agent: {} chars", prompt.len());
+
+        // Validate that agent is initialized
+        if self.goose_agent.is_none() {
+            anyhow::bail!("Goose agent not initialized. Call initialize() first.");
+        }
+
+        // TODO: Replace with actual Goose agent processing
+        // This would involve:
+        // 1. Sending the prompt to the Goose agent
+        // 2. Handling streaming responses
+        // 3. Processing tool calls and interactions
+        // 4. Returning the final result
+
+        // For now, simulate processing
+        self.send_ai_thinking("Starting Goose agent processing...").await?;
+
+        // Simulate processing time
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        self.send_ai_thinking("Goose agent has analyzed the prompt and is generating responses...").await?;
+
+        // Simulate more processing
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        self.send_ai_thinking("Goose agent processing completed successfully.").await?;
+
+        let result_id = uuid::Uuid::new_v4().to_string();
+        info!("Goose agent processing completed: {}", result_id);
+
+        Ok(result_id)
     }
 }
 

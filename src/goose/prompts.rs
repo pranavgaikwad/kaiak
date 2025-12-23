@@ -63,6 +63,33 @@ Guidelines:
         prompt
     }
 
+    /// Convert incident data to natural language prompts for Goose agent
+    /// This is the key method for T002 - Implement Incident-to-Prompt Conversion
+    pub fn format_incident_prompt(incidents: &[Incident], context: &str) -> String {
+        let mut prompt = String::new();
+        prompt.push_str("Please help fix these code migration issues:\n\n");
+
+        for (i, incident) in incidents.iter().enumerate() {
+            prompt.push_str(&format!(
+                "{}. File: {} (Line {})\n   Issue: {} ({:?})\n   Description: {}\n   Details: {}\n\n",
+                i + 1,
+                incident.file_path,
+                incident.line_number,
+                incident.category,
+                incident.severity,
+                incident.description,
+                incident.message
+            ));
+        }
+
+        if !context.is_empty() {
+            prompt.push_str(&format!("Additional context:\n{}\n\n", context));
+        }
+
+        prompt.push_str("Please analyze the files and make the necessary changes to resolve these issues.");
+        prompt
+    }
+
     /// Generate prompt for specific incident analysis
     pub fn incident_analysis_prompt(incident: &Incident, file_content: &str) -> String {
         format!(
@@ -198,5 +225,74 @@ mod tests {
         assert!(prompt.contains("old_method()"));
         assert!(prompt.contains("new_method()"));
         assert!(prompt.contains("Replace deprecated API call"));
+    }
+
+    #[test]
+    fn test_format_incident_prompt() {
+        let incident = Incident::new(
+            "deprecated-api".to_string(),
+            "src/main.rs".to_string(),
+            42,
+            Severity::Warning,
+            "Deprecated API usage".to_string(),
+            "old_method() is deprecated".to_string(),
+            "deprecated".to_string(),
+        );
+
+        let prompt = PromptBuilder::format_incident_prompt(&[incident], "migration context");
+        assert!(prompt.contains("Please help fix these code migration issues"));
+        assert!(prompt.contains("src/main.rs"));
+        assert!(prompt.contains("Line 42"));
+        assert!(prompt.contains("deprecated"));
+        assert!(prompt.contains("Warning"));
+        assert!(prompt.contains("migration context"));
+        assert!(prompt.contains("Please analyze the files and make the necessary changes"));
+    }
+
+    #[test]
+    fn test_format_incident_prompt_empty_context() {
+        let incident = Incident::new(
+            "test-rule".to_string(),
+            "test.rs".to_string(),
+            1,
+            Severity::Error,
+            "Test issue".to_string(),
+            "Test message".to_string(),
+            "test".to_string(),
+        );
+
+        let prompt = PromptBuilder::format_incident_prompt(&[incident], "");
+        assert!(prompt.contains("Please help fix these code migration issues"));
+        assert!(prompt.contains("test.rs"));
+        assert!(!prompt.contains("Additional context"));
+    }
+
+    #[test]
+    fn test_format_incident_prompt_multiple_incidents() {
+        let incident1 = Incident::new(
+            "rule1".to_string(),
+            "file1.rs".to_string(),
+            10,
+            Severity::Error,
+            "First issue".to_string(),
+            "First message".to_string(),
+            "cat1".to_string(),
+        );
+
+        let incident2 = Incident::new(
+            "rule2".to_string(),
+            "file2.rs".to_string(),
+            20,
+            Severity::Warning,
+            "Second issue".to_string(),
+            "Second message".to_string(),
+            "cat2".to_string(),
+        );
+
+        let prompt = PromptBuilder::format_incident_prompt(&[incident1, incident2], "");
+        assert!(prompt.contains("1. File: file1.rs"));
+        assert!(prompt.contains("2. File: file2.rs"));
+        assert!(prompt.contains("First issue"));
+        assert!(prompt.contains("Second issue"));
     }
 }
