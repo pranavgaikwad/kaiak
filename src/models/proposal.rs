@@ -1,55 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use super::{Id, Timestamp, Metadata, Identifiable, Timestampable};
+use super::{Id, Metadata, Identifiable};
 
 /// File modification proposal for user approval workflow
-///
-/// Enhanced model for User Story 3: Interactive File Modification Approval
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileModificationProposal {
-    /// Unique identifier for this proposal
     pub id: Id,
-
-    /// Session this proposal belongs to
     pub session_id: Option<Id>,
-
-    /// Path to the file that would be modified
     pub file_path: String,
-
-    /// Type of modification being proposed
     pub modification_type: String,
-
-    /// Original content that would be replaced
     pub original_content: String,
-
-    /// Proposed new content
     pub proposed_content: String,
-
-    /// Legacy change type for backwards compatibility
     pub change_type: Option<ChangeType>,
 
-    /// Human-readable description of the change
-    pub description: String,
-
-    /// AI confidence in this proposal (0.0 to 1.0)
-    pub confidence: Option<f32>,
-
-    /// Current approval status
     pub approval_status: ApprovalStatus,
-
-    /// Line range affected by the modification (start_line, end_line)
     pub line_range: Option<(u32, u32)>,
-
-    /// When this proposal was created
     pub created_at: chrono::DateTime<chrono::Utc>,
-
-    /// When approval/rejection occurred
     pub approved_at: Option<chrono::DateTime<chrono::Utc>>,
-
-    /// When this proposal expires (if not approved/rejected by then)
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
-
-    /// Additional metadata about the proposal
     #[serde(default)]
     pub metadata: Option<Metadata>,
 }
@@ -58,19 +26,12 @@ pub struct FileModificationProposal {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModificationType {
-    /// Replace specific content in the file
     ContentReplace,
-    /// Insert new content at a specific location
     ContentInsert,
-    /// Delete specific content from the file
     ContentDelete,
-    /// Rename the file
     FileRename,
-    /// Create a new file
     FileCreate,
-    /// Delete the entire file
     FileDelete,
-    /// Move the file to a different location
     FileMove,
 }
 
@@ -99,15 +60,10 @@ pub enum ApprovalStatus {
 /// Response to a file modification proposal
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProposalResponse {
-    /// ID of the proposal being responded to
     pub proposal_id: Id,
-    /// Whether the proposal was approved
     pub approved: bool,
-    /// Optional comment from the user
     pub comment: Option<String>,
-    /// When the response was given
     pub responded_at: chrono::DateTime<chrono::Utc>,
-    /// User who provided the response
     pub responded_by: Option<String>,
 }
 
@@ -142,7 +98,7 @@ impl FileModificationProposal {
         modification_type: String,
         original_content: String,
         proposed_content: String,
-        description: String,
+        _description: String,
     ) -> Self {
         let now = chrono::Utc::now();
 
@@ -154,8 +110,6 @@ impl FileModificationProposal {
             original_content,
             proposed_content,
             change_type: None,
-            description,
-            confidence: None,
             approval_status: ApprovalStatus::Pending,
             line_range: None,
             created_at: now,
@@ -172,8 +126,8 @@ impl FileModificationProposal {
         original_content: String,
         proposed_content: String,
         change_type: ChangeType,
-        description: String,
-        confidence: f32,
+        _description: String,
+        _confidence: f32,
     ) -> Self {
         let now = chrono::Utc::now();
         let modification_type = match change_type {
@@ -191,8 +145,6 @@ impl FileModificationProposal {
             original_content,
             proposed_content,
             change_type: Some(change_type),
-            description,
-            confidence: Some(confidence),
             approval_status: ApprovalStatus::Pending,
             line_range: None,
             created_at: now,
@@ -346,7 +298,6 @@ impl FileModificationProposal {
 impl Identifiable for FileModificationProposal {}
 
 impl ProposalResponse {
-    /// Create a new approval response
     pub fn approve(proposal_id: Id, comment: Option<String>) -> Self {
         Self {
             proposal_id,
@@ -357,7 +308,7 @@ impl ProposalResponse {
         }
     }
 
-    /// Create a new rejection response
+    /// Creae a new rejection response
     pub fn reject(proposal_id: Id, comment: Option<String>) -> Self {
         Self {
             proposal_id,
@@ -368,7 +319,6 @@ impl ProposalResponse {
         }
     }
 
-    /// Set the user who provided the response
     pub fn with_user(mut self, user: String) -> Self {
         self.responded_by = Some(user);
         self

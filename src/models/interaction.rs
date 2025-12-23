@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use super::{Id, Timestamp, Metadata, Identifiable};
+use super::{Id, Metadata, Identifiable};
 
 /// User interaction for approval workflows
 ///

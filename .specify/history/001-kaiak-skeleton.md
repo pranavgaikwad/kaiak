@@ -1,8 +1,8 @@
-# Step 1: Begin research
+## Step 1: Begin research
 
 I added a project Goose to your context under ~/Projects/goose/. This is cloned from 
 `https://github.com/block/goose`. It is an open source AI agent which is highly customizable and flexible
-specifically designed for general purpose computing. I also added another directory
+specifically designed for general purpose coding. I also added another directory
 ~/Projects/editor-extensions/vscode/core which is a vscode extension we developed that helps users modernize /
 migrate their source code to newer technologies using AI agents. The IDE extension uses a static source code
 analysis tool to analyze the source code in open workspace and displays migration issues. Each occurrence of a
@@ -26,7 +26,7 @@ solving the problem of modernizing / migrating source code to newer technologies
 is important that the underlying agent we use is flexible in that we can change the prompts, modify / add new tools. 
 We do not want to make any code changes just yet. Lets only focus on talking out a design. 
 
-# Step 2: Run speckit.constitution to establish baseline
+## Step 2: Run speckit.constitution to establish baseline
 
 Now that you know about the problem statement, lets start working on this Rust server
 which we will call "kaiak" moving forward. Let's focus on coding standards, code quality,
@@ -39,7 +39,7 @@ part of source code still can benefit from more granular unit testing. Comments 
 only be added for complex functions, important parts of the source code - unnecessary verbose comments
 for trivial things should be avoided.
 
-# Step 3: Run speckit.specify to establish spec for the first skeleton feature
+## Step 3: Run speckit.specify to establish spec for the first skeleton feature
 
 
 Lets begin building the skeleton for our server "kaiak". Kaiak will be a standalone server capable of running the Goose agent. Kaiak will be able to do the following:
@@ -53,7 +53,7 @@ Lets begin building the skeleton for our server "kaiak". Kaiak will be a standal
 
 The Goose AI agent will perform the actual work. With Kaiak, our focus is to enable migration use cases leveraging Goose. We are not targeting a general-purpose coding assistant. Therefore, our IDE extension should provide a controlled approach to performing migrations through Goose. We will use information from static analysis tools to identify migration issues and integrate that data into prompts. Consequently, we will use our own custom prompts. We will configure tools for the Goose agent. We will stream messages back to the user. A critical requirement is that we will not allow Goose to make file changes. Note that the agentic module used a ModifiedFile message type to explicitly show file modification information to the user and request confirmation. Additionally, we will stream tool calls, the thinking process, and all AI messages back to the user. 
 
-# Step 4: Run speckit.plan to generate a technical plan
+## Step 4: Run speckit.plan to generate a technical plan
 
 Kaiak will be a standalone server written in Rust. It will consume `Goose (github.com/block/goose)` as
  a dependency and consume its public APIs to create, manage and run Goose AI agent. Kaiak will use LSP style JSON-RPC 
@@ -63,3 +63,9 @@ to gate PRs as well as have local scripts to run the same CI as much as possible
 tests over unit tests or smaller isolated tests. Kaiak will keep dependencies to the minimum but will also not 
 re-invent the wheel for things such as socket communication, JSON-RPC implemenation that is compatible with vscodes 
 json rpc, etc.
+
+## Step 5: Run speckit.tasks
+
+## Step 6: Run speckit.analyze
+
+## Step 7: Run speckit.implement
