@@ -1,0 +1,151 @@
+use serde::{Deserialize, Serialize};
+use super::{Id, Timestamp, Metadata};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiSession {
+    pub id: Id,
+    pub goose_session_id: Option<String>,
+    pub status: SessionStatus,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub configuration: SessionConfiguration,
+    pub active_request_id: Option<Id>,
+    pub message_count: u32,
+    pub error_count: u32,
+    #[serde(default)]
+    pub metadata: Metadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionStatus {
+    Created,
+    Initializing,
+    Ready,
+    Processing,
+    Completed,
+    Error,
+    Terminated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionConfiguration {
+    pub workspace_path: String,
+    pub session_name: Option<String>,
+    /// Arbitrary provider configuration passed from IDE (LangChain format)
+    pub provider_config: Option<serde_json::Value>,
+    pub timeout: Option<u32>,
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub custom: Metadata,
+}
+
+impl AiSession {
+    pub fn new(workspace_path: String, session_name: Option<String>) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            goose_session_id: None,
+            status: SessionStatus::Created,
+            created_at: now.clone(),
+            updated_at: now,
+            configuration: SessionConfiguration {
+                workspace_path,
+                session_name,
+                provider_config: None,
+                timeout: None,
+                max_turns: None,
+                custom: Metadata::new(),
+            },
+            active_request_id: None,
+            message_count: 0,
+            error_count: 0,
+            metadata: Metadata::new(),
+        }
+    }
+
+    pub fn new_with_provider_config(
+        workspace_path: String,
+        session_name: Option<String>,
+        provider_config: serde_json::Value,
+    ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            goose_session_id: None,
+            status: SessionStatus::Created,
+            created_at: now.clone(),
+            updated_at: now,
+            configuration: SessionConfiguration {
+                workspace_path,
+                session_name,
+                provider_config: Some(provider_config),
+                timeout: None,
+                max_turns: None,
+                custom: Metadata::new(),
+            },
+            active_request_id: None,
+            message_count: 0,
+            error_count: 0,
+            metadata: Metadata::new(),
+        }
+    }
+
+    pub fn update_status(&mut self, status: SessionStatus) {
+        self.status = status;
+        self.updated_at = chrono::Utc::now().to_rfc3339();
+    }
+
+    pub fn increment_message_count(&mut self) {
+        self.message_count += 1;
+        self.updated_at = chrono::Utc::now().to_rfc3339();
+    }
+
+    pub fn increment_error_count(&mut self) {
+        self.error_count += 1;
+        self.updated_at = chrono::Utc::now().to_rfc3339();
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self.status, SessionStatus::Ready | SessionStatus::Processing)
+    }
+}
+
+/// Session model used by User Story 4 lifecycle management
+/// Simpler than AiSession for better separation of concerns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: Id,
+    pub goose_session_id: String,
+    pub status: SessionStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub configuration: SessionConfiguration,
+    pub active_request_id: Option<Id>,
+    pub message_count: u32,
+    pub error_count: u32,
+}
+
+impl Session {
+    pub fn new(workspace_path: String, session_name: Option<String>) -> Self {
+        let now = chrono::Utc::now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            goose_session_id: uuid::Uuid::new_v4().to_string(),
+            status: SessionStatus::Created,
+            created_at: now,
+            updated_at: now,
+            configuration: SessionConfiguration {
+                workspace_path,
+                session_name,
+                provider_config: None,
+                timeout: None,
+                max_turns: None,
+                custom: Metadata::new(),
+            },
+            active_request_id: None,
+            message_count: 0,
+            error_count: 0,
+        }
+    }
+}
