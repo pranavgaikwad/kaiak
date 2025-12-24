@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use validator::Validate;
 
 // Import actual Goose types
 pub use goose::agents::{SessionConfig as GooseSessionConfig, RetryConfig};
@@ -10,32 +11,40 @@ pub use goose::session::SessionType;
 // We'll use serde_json::Value as a flexible type for now
 pub type GooseModelConfig = serde_json::Value;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct AgentConfiguration {
+    #[validate(nested)]
     pub workspace: WorkspaceConfig,
     pub model: GooseModelConfig,  // Re-use Goose's model configuration
+    #[validate(nested)]
     pub tools: ToolConfig,
-    pub session: GooseSessionConfig,  // Re-use Goose's session configuration
+    pub session: GooseSessionConfig,  // Re-use Goose's session configuration - validated by Goose
+    #[validate(nested)]
     pub permissions: PermissionConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct WorkspaceConfig {
+    #[validate(custom(function = "validate_workspace_path"))]
     pub working_dir: PathBuf,
+    #[validate(length(min = 1, message = "At least one include pattern is required"))]
     pub include_patterns: Vec<String>,
     pub exclude_patterns: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct ToolConfig {
     pub enabled_extensions: Vec<String>,
+    #[validate(nested)]
     pub custom_tools: Vec<CustomToolConfig>,
     pub planning_mode: bool,
+    #[validate(range(min = 1, max = 10000, message = "max_tool_calls must be between 1 and 10000"))]
     pub max_tool_calls: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct PermissionConfig {
+    #[validate(length(min = 1, message = "At least one tool permission must be specified"))]
     pub tool_permissions: HashMap<String, ToolPermission>,
 }
 
@@ -47,8 +56,9 @@ pub enum ToolPermission {
     Approve,     // Require user approval for this tool
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CustomToolConfig {
+    #[validate(length(min = 1, max = 100, message = "Tool name must be between 1 and 100 characters"))]
     pub name: String,
     pub extension_type: ExtensionType,
     pub config: serde_json::Value,
@@ -126,6 +136,28 @@ impl Default for AgentConfiguration {
             permissions: PermissionConfig::default(),
         }
     }
+}
+
+/// Custom validation function for workspace path
+fn validate_workspace_path(path: &PathBuf) -> Result<(), validator::ValidationError> {
+    // Check if path is not empty
+    if path.as_os_str().is_empty() {
+        return Err(validator::ValidationError::new("workspace_path_empty"));
+    }
+
+    // Check if path contains valid UTF-8
+    if path.to_str().is_none() {
+        return Err(validator::ValidationError::new("workspace_path_invalid_utf8"));
+    }
+
+    // Check for reasonable path length (avoid extremely long paths)
+    if let Some(path_str) = path.to_str() {
+        if path_str.len() > 4096 {
+            return Err(validator::ValidationError::new("workspace_path_too_long"));
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

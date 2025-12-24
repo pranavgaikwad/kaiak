@@ -1,11 +1,17 @@
 use serde::{Deserialize, Serialize};
+use validator::Validate;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Validate)]
 pub struct MigrationIncident {
+    #[validate(length(min = 1, max = 255, message = "Incident ID must be between 1 and 255 characters"))]
     pub id: String,
+    #[validate(length(min = 1, max = 255, message = "Rule ID must be between 1 and 255 characters"))]
     pub rule_id: String,
+    #[validate(length(min = 1, max = 1000, message = "Message must be between 1 and 1000 characters"))]
     pub message: String,
+    #[validate(length(max = 5000, message = "Description must not exceed 5000 characters"))]
     pub description: String,
+    #[validate(length(max = 100, message = "Effort must not exceed 100 characters"))]
     pub effort: String,
     pub severity: IncidentSeverity,
 }

@@ -230,9 +230,12 @@ impl LanguageServer for KaiakServer {
                 }
             }
             _ => Err(Error {
-                code: tower_lsp::jsonrpc::ErrorCode::MethodNotFound,
-                message: format!("Unknown command: {} - only kaiak/configure, kaiak/generate_fix, and kaiak/delete_session are supported", params.command).into(),
-                data: None,
+                code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32601),
+                message: format!("Method not found: {} - only kaiak/configure, kaiak/generate_fix, and kaiak/delete_session are supported", params.command).into(),
+                data: Some(serde_json::json!({
+                    "supported_methods": ["kaiak/configure", "kaiak/generate_fix", "kaiak/delete_session"],
+                    "requested_method": params.command
+                })),
             }),
         }
     }
