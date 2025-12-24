@@ -5,15 +5,21 @@ use crate::models::{AiSession, SessionStatus, FixGenerationRequest, StreamMessag
 use crate::goose::{PromptBuilder, monitoring::{GooseEventBridge, MessageCallback, GooseAgentEvent}};
 use tracing::{info, debug, warn, error};
 
+use goose::providers::{self, base::Provider};
+use goose::model::ModelConfig;
+use goose::conversation::{Conversation, message::{Message, MessageContent as GooseMessageContent}};
+use rmcp::model::{Role, RawTextContent};
+
 /// Wrapper around Goose session providing Kaiak-specific functionality
 pub struct GooseSessionWrapper {
     pub session_id: String,
     pub workspace_path: String,
     pub status: SessionStatus,
     pub configuration: SessionConfiguration,
-    /// TODO: Actual Goose agent instance - will hold real goose::Agent
-    /// This would be: goose_agent: Option<goose::Agent>
-    goose_agent: Option<GooseAgentPlaceholder>,
+    /// Real Goose provider instance for AI completions
+    goose_provider: Option<Arc<dyn Provider>>,
+    /// Current conversation state
+    conversation: Option<Conversation>,
     /// Goose Event Bridge for real-time streaming (T005)
     event_bridge: Option<GooseEventBridge>,
     /// Active request being processed
@@ -22,13 +28,12 @@ pub struct GooseSessionWrapper {
     pub message_callback: Option<Arc<dyn MessageCallback + Send + Sync>>,
 }
 
-/// Placeholder for actual Goose agent until real integration
-/// This will be replaced with goose::Agent from the Goose library
-#[derive(Debug)]
-struct GooseAgentPlaceholder {
-    workspace_path: String,
-    provider: Option<String>,
-    model: Option<String>,
+/// Goose agent integration configuration
+#[derive(Debug, Clone)]
+pub struct GooseAgentConfig {
+    pub workspace_path: String,
+    pub provider_name: String,
+    pub model_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -173,7 +178,8 @@ impl GooseSessionWrapper {
             workspace_path: ai_session.configuration.workspace_path.clone(),
             status: SessionStatus::Created,
             configuration: config,
-            goose_agent: None,
+            goose_provider: None,
+            conversation: None,
             event_bridge: None,
             active_request: None,
             message_callback: None,
@@ -189,13 +195,22 @@ impl GooseSessionWrapper {
             // Continue anyway for now - may be created later
         }
 
-        // Initialize actual Goose agent instance
-        // TODO: Replace with real goose::Agent::new() when fully integrated
-        let agent = GooseAgentPlaceholder {
-            workspace_path: self.workspace_path.clone(),
-            provider: self.configuration.provider.clone(),
-            model: self.configuration.model.clone(),
-        };
+        // Initialize real Goose provider
+        let provider_name = self.configuration.provider.as_ref()
+            .unwrap_or(&"openai".to_string()).clone();
+        let model_name = self.configuration.model.as_ref()
+            .unwrap_or(&"gpt-4".to_string()).clone();
+
+        info!("Creating Goose provider: {} with model: {}", provider_name, model_name);
+
+        let model_config = ModelConfig::new(&model_name)?;
+        let provider = providers::create(&provider_name, model_config).await
+            .map_err(|e| anyhow::anyhow!("Failed to create Goose provider: {}", e))?;
+
+        // Initialize conversation
+        let conversation = Conversation::empty();
+
+        info!("Goose provider and conversation initialized for workspace: {}", self.workspace_path);
 
         // Initialize Goose Event Bridge (T005)
         let mut event_bridge = GooseEventBridge::new(self.session_id.clone(), None);
@@ -209,7 +224,8 @@ impl GooseSessionWrapper {
         event_bridge.start_event_subscription().await?;
         event_bridge.subscribe_to_goose_events().await?;
 
-        self.goose_agent = Some(agent);
+        self.goose_provider = Some(provider);
+        self.conversation = Some(conversation);
         self.event_bridge = Some(event_bridge);
         self.status = SessionStatus::Ready;
 
@@ -298,13 +314,10 @@ impl GooseSessionWrapper {
             tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
         }
 
-        // Send thinking about strategy
         self.send_ai_thinking("Based on my analysis, I need to consider the migration patterns, potential side effects, and best practices for each type of incident.").await?;
 
-        // Send progress update
         self.send_progress_update(35, "generating_context", "Generating contextual information").await?;
 
-        // Thinking about context generation
         self.send_ai_thinking(&format!(
             "The workspace is located at '{}'. I should understand the project structure and dependencies to provide accurate migration suggestions.",
             request.workspace_path
@@ -312,10 +325,8 @@ impl GooseSessionWrapper {
 
         self.send_progress_update(50, "generating_fixes", "Generating fix suggestions").await?;
 
-        // Thinking about fix generation approach
         self.send_ai_thinking("Now I'll generate specific fixes for each incident. I need to ensure the fixes are safe, maintainable, and follow migration best practices.").await?;
 
-        // Send to Goose agent for processing (T003 - Wire Agent Processing Pipeline)
         self.send_ai_thinking("Sending incident prompt to Goose agent...").await?;
 
         let _agent_result = self.process_with_goose_agent(incident_prompt).await
@@ -324,7 +335,6 @@ impl GooseSessionWrapper {
                 anyhow::anyhow!("Agent processing failed: {}", e)
             })?;
 
-        // Simulate processing with more detailed thinking
         for (i, incident) in request.incidents.iter().enumerate() {
             self.send_ai_thinking(&format!(
                 "For incident {} ({}): I'm considering multiple fix approaches. The safest option would be to {}...",
@@ -343,18 +353,14 @@ impl GooseSessionWrapper {
             tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
         }
 
-        // Final thinking before completion
         self.send_ai_thinking("I've completed the analysis and generated appropriate fixes. Let me validate these recommendations to ensure they're safe and effective.").await?;
 
         self.send_progress_update(90, "validating_fixes", "Validating fix proposals").await?;
 
-        // Thinking about validation
         self.send_ai_thinking("All fixes look good. They follow migration best practices, maintain code safety, and address the identified issues appropriately.").await?;
 
-        // Send completion progress
         self.send_progress_update(100, "completed", "Fix generation completed").await?;
 
-        // Final thinking message
         self.send_ai_thinking("Fix generation process completed successfully. The proposed solutions are ready for review and implementation.").await?;
 
         self.status = SessionStatus::Ready;
@@ -520,166 +526,57 @@ impl GooseSessionWrapper {
     /// Process with Goose agent (placeholder for actual integration)
     /// This method demonstrates event streaming through the GooseEventBridge
     pub async fn process_with_goose_agent(&mut self, prompt: String) -> Result<String> {
-        info!("Processing with Goose agent: {} chars", prompt.len());
+        info!("Processing with Goose provider: {} chars", prompt.len());
 
-        // Validate that agent is initialized
-        if self.goose_agent.is_none() {
-            anyhow::bail!("Goose agent not initialized. Call initialize() first.");
+        let provider = self.goose_provider.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Goose provider not initialized. Call initialize() first."))?;
+
+        let conversation = self.conversation.as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Conversation not initialized. Call initialize() first."))?;
+
+        if let Some(event_bridge) = &self.event_bridge {
+            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
+                text: "Processing request with Goose provider...".to_string(),
+            }).await?;
         }
 
-        // TODO: Replace with actual Goose agent processing
-        // This would involve:
-        // 1. Sending the prompt to the Goose agent
-        // 2. Handling streaming responses via event bridge
-        // 3. Processing tool calls and interactions
-        // 4. Returning the final result
+        let raw_text = RawTextContent { text: prompt, meta: None };
+        let text_content = rmcp::model::TextContent::new(raw_text, None);
+        let message_content = vec![GooseMessageContent::Text(text_content)];
+        let timestamp = chrono::Utc::now().timestamp_millis();
+        let user_message = Message::new(Role::User, timestamp, message_content);
+        conversation.push(user_message);
 
-        // Simulate Goose agent events through the event bridge
+        let messages = conversation.messages();
+        let system_prompt = "You are an AI assistant specialized in code migration and analysis. Help users migrate their source code effectively.";
+
+        info!("Calling Goose provider for completion...");
+        let (response_message, _usage) = provider
+            .complete(system_prompt, messages, &[])
+            .await
+            .map_err(|e| anyhow::anyhow!("Goose provider error: {}", e))?;
+
+        conversation.push(response_message.clone());
+
+        let response_text = response_message.content.iter()
+            .filter_map(|content| match content {
+                GooseMessageContent::Text(text_content) => Some(text_content.raw.text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Send response event through event bridge
         if let Some(event_bridge) = &self.event_bridge {
-            // Simulate thinking events
-            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
-                text: "Starting Goose agent processing...".to_string(),
-            }).await?;
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
-                text: "Analyzing incident prompt and determining best approach...".to_string(),
-            }).await?;
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-
-            // Simulate AI response
             event_bridge.handle_goose_event(GooseAgentEvent::Message {
-                content: "I'll help you fix these code migration issues. Let me analyze each incident and propose solutions.".to_string(),
+                content: response_text.clone(),
                 partial: false,
                 confidence: Some(0.95),
             }).await?;
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            // T009 - Simulate tool call with actual interception
-            let tool_call_id = "tool-001";
-            let tool_name = "file_read"; // Use read tool first, which should be allowed
-            let tool_params = serde_json::json!({
-                "file_path": "src/example.java",
-                "context_lines": 5
-            });
-
-            // Emit tool call start event
-            event_bridge.handle_goose_event(GooseAgentEvent::ToolCall {
-                id: tool_call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                parameters: tool_params.clone(),
-                status: crate::goose::monitoring::ToolExecutionStatus::Starting,
-            }).await?;
-
-            // Handle tool call through interception system
-            let tool_result = self.handle_tool_call_event(tool_call_id, tool_name, tool_params).await?;
-
-            match tool_result {
-                crate::goose::agent::GooseToolCallResult::Executed(execution_result) => {
-                    // Tool was allowed and executed
-                    self.send_tool_result(&execution_result).await?;
-
-                    // Emit tool completion event
-                    event_bridge.handle_goose_event(GooseAgentEvent::ToolResult {
-                        call_id: tool_call_id.to_string(),
-                        success: execution_result.success,
-                        result: execution_result.output,
-                        error: execution_result.error,
-                        execution_time_ms: execution_result.execution_time_ms,
-                    }).await?;
-                }
-                crate::goose::agent::GooseToolCallResult::InterceptedForApproval { interaction, .. } => {
-                    // Tool was intercepted for approval
-                    self.send_tool_interception(&interaction, tool_name).await?;
-
-                    // Emit system message about interception
-                    event_bridge.handle_goose_event(GooseAgentEvent::System {
-                        event: "tool_intercepted".to_string(),
-                        status: "pending_approval".to_string(),
-                        metadata: serde_json::json!({
-                            "tool_name": tool_name,
-                            "interaction_id": interaction.id,
-                            "file_path": interaction.proposal_id
-                        }),
-                    }).await?;
-                }
-            }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            // Simulate a file write tool call that will be intercepted
-            let write_tool_id = "tool-002";
-            let write_tool_name = "file_write";
-            let write_params = serde_json::json!({
-                "file_path": "src/example.java",
-                "content": "// Updated code with migration fixes"
-            });
-
-            // Emit tool call start event
-            event_bridge.handle_goose_event(GooseAgentEvent::ToolCall {
-                id: write_tool_id.to_string(),
-                tool_name: write_tool_name.to_string(),
-                parameters: write_params.clone(),
-                status: crate::goose::monitoring::ToolExecutionStatus::Starting,
-            }).await?;
-
-            // Handle write tool call (should be intercepted)
-            let write_result = self.handle_tool_call_event(write_tool_id, write_tool_name, write_params).await?;
-
-            match write_result {
-                crate::goose::agent::GooseToolCallResult::Executed(execution_result) => {
-                    // Shouldn't happen with default config, but handle it
-                    self.send_tool_result(&execution_result).await?;
-
-                    event_bridge.handle_goose_event(GooseAgentEvent::ToolResult {
-                        call_id: write_tool_id.to_string(),
-                        success: execution_result.success,
-                        result: execution_result.output,
-                        error: execution_result.error,
-                        execution_time_ms: execution_result.execution_time_ms,
-                    }).await?;
-                }
-                crate::goose::agent::GooseToolCallResult::InterceptedForApproval { interaction, .. } => {
-                    // Tool was intercepted for approval (expected)
-                    self.send_tool_interception(&interaction, write_tool_name).await?;
-
-                    event_bridge.handle_goose_event(GooseAgentEvent::System {
-                        event: "file_modification_intercepted".to_string(),
-                        status: "awaiting_approval".to_string(),
-                        metadata: serde_json::json!({
-                            "tool_name": write_tool_name,
-                            "interaction_id": interaction.id,
-                            "file_modification": true
-                        }),
-                    }).await?;
-                }
-            }
-
-            event_bridge.handle_goose_event(GooseAgentEvent::Thinking {
-                text: "Analysis complete. Generating fix proposals for each incident.".to_string(),
-            }).await?;
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            // Simulate system completion event
-            event_bridge.handle_goose_event(GooseAgentEvent::System {
-                event: "processing_completed".to_string(),
-                status: "success".to_string(),
-                metadata: serde_json::json!({
-                    "incidents_processed": 3,
-                    "fixes_proposed": 3,
-                    "processing_time_ms": 650
-                }),
-            }).await?;
         }
 
-        let result_id = uuid::Uuid::new_v4().to_string();
-        info!("Goose agent processing completed: {}", result_id);
-
-        Ok(result_id)
+        info!("Goose provider processing completed: {} chars", response_text.len());
+        Ok(response_text)
     }
 }
 

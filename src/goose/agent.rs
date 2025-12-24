@@ -11,26 +11,17 @@ use tracing::{info, debug, warn, error};
 pub struct AgentManager {
     session_manager: Arc<SessionManager>,
     active_requests: Arc<RwLock<HashMap<String, RequestState>>>,
-    /// Handler for file modification proposals
     modification_handler: Arc<ModificationHandler>,
-    /// Handler for user interactions
     interaction_handler: Arc<InteractionHandler>,
-    /// Configuration for file modification prevention
     config: AgentConfig,
-    // TODO: This will hold the actual Goose AgentManager instance
-    // goose_manager: goose::AgentManager,
 }
 
 /// Configuration for agent behavior
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
-    /// Whether to prevent all file modifications (requires approval)
     pub prevent_file_modifications: bool,
-    /// Whether to allow read-only operations
     pub allow_read_operations: bool,
-    /// Maximum number of pending proposals per session
     pub max_pending_proposals: usize,
-    /// Default timeout for file modification approvals in seconds
     pub default_approval_timeout_seconds: u32,
 }
 
@@ -40,7 +31,7 @@ impl Default for AgentConfig {
             prevent_file_modifications: true, // Default to safe mode
             allow_read_operations: true,
             max_pending_proposals: 20,
-            default_approval_timeout_seconds: 300, // 5 minutes
+            default_approval_timeout_seconds: 600, // 10 minutes
         }
     }
 }
@@ -65,12 +56,10 @@ pub enum RequestStatus {
 /// Result of a safe tool call operation
 #[derive(Debug)]
 pub enum SafeToolCallResult {
-    /// Operation is allowed to proceed normally
     Allowed {
         tool_name: String,
         parameters: serde_json::Value,
     },
-    /// Operation was intercepted and requires approval
     InterceptedForApproval {
         original_tool_name: String,
         original_parameters: serde_json::Value,
@@ -93,19 +82,17 @@ pub struct FileModificationStats {
     pub file_modification_interactions: usize,
 }
 
-/// T009 - Result of handling a Goose agent tool call
+/// Result of handling a Goose agent tool call
 #[derive(Debug)]
 pub enum GooseToolCallResult {
-    /// Tool call was executed successfully
     Executed(ToolExecutionResult),
-    /// Tool call was intercepted and requires approval
     InterceptedForApproval {
         interaction: UserInteraction,
         pending_call: PendingToolCall,
     },
 }
 
-/// T009 - Result of executing a tool call
+/// Result of executing a tool call
 #[derive(Debug, Clone)]
 pub struct ToolExecutionResult {
     pub success: bool,
@@ -115,7 +102,7 @@ pub struct ToolExecutionResult {
     pub metadata: Option<serde_json::Value>,
 }
 
-/// T009 - Pending tool call awaiting approval
+/// Pending tool call awaiting approval
 #[derive(Debug, Clone)]
 pub struct PendingToolCall {
     pub tool_call_id: String,
@@ -129,7 +116,7 @@ pub struct PendingToolCall {
     pub status: ToolCallStatus,
 }
 
-/// T009 - Status of a tool call in the approval process
+/// Status of a tool call in the approval process
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolCallStatus {
     PendingApproval,
@@ -140,7 +127,7 @@ pub enum ToolCallStatus {
     Expired,
 }
 
-/// T010 - Result of tool call safety verification
+/// Result of tool call safety verification
 #[derive(Debug, Clone)]
 pub struct ToolSafetyResult {
     pub safe: bool,
@@ -150,7 +137,7 @@ pub struct ToolSafetyResult {
     pub requires_approval: bool,
 }
 
-/// T010 - Risk level assessment for tool calls
+/// Risk level assessment for tool calls
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum ToolRiskLevel {
     Low = 0,
@@ -159,7 +146,7 @@ pub enum ToolRiskLevel {
     Critical = 3,
 }
 
-/// T010 - Safety enforcement actions
+/// Safety enforcement actions
 #[derive(Debug, Clone, PartialEq)]
 pub enum SafetyEnforcementAction {
     Allow,
@@ -210,10 +197,7 @@ impl AgentManager {
             modification_handler.clone(),
         ));
 
-        // TODO: Initialize actual Goose AgentManager
-        // let goose_manager = goose::AgentManager::instance().await?;
-
-        info!("AgentManager initialized successfully with file modification prevention enabled: {}", config.prevent_file_modifications);
+        info!("AgentManager initialized successfully with config: {:?}", config);
 
         Ok(Self {
             session_manager,
@@ -221,7 +205,6 @@ impl AgentManager {
             modification_handler,
             interaction_handler,
             config,
-            // goose_manager,
         })
     }
 
@@ -265,31 +248,24 @@ impl AgentManager {
     ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<StreamMessage>)> {
         info!("Processing fix generation request for session: {}", request.session_id);
 
-        // Validate request
         if request.incidents.is_empty() {
             anyhow::bail!("Fix generation request must contain at least one incident");
         }
 
-        // Create AI session (in real implementation, this would come from session store)
         let ai_session = AiSession::new(request.workspace_path.clone(), None);
 
-        // Get or create session
         let session_wrapper = self.get_or_create_session(&ai_session).await?;
 
-        // Set up message streaming
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let handler = AgentMessageHandler::new(tx.clone());
 
-        // Set up session with message callback
         {
             let mut session = session_wrapper.write().await;
             session.set_message_callback(Arc::new(handler));
         }
 
-        // Generate request ID
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        // Track request state
         {
             let mut requests = self.active_requests.write().await;
             requests.insert(
@@ -304,7 +280,6 @@ impl AgentManager {
             );
         }
 
-        // Start processing in background with tool call streaming
         let session_clone = session_wrapper.clone();
         let request_clone = request.clone();
         let request_id_clone = request_id.clone();
@@ -317,7 +292,6 @@ impl AgentManager {
 
             let result = {
                 let mut session = session_clone.write().await;
-                // Convert incidents to prompt and send to Goose agent (T003 - Wire Agent Processing Pipeline)
                 let prompt = crate::goose::PromptBuilder::format_incident_prompt(&request_clone.incidents, "");
                 let agent_result = session.process_with_goose_agent(prompt).await;
                 match agent_result {
@@ -567,183 +541,6 @@ impl AgentManager {
 
     pub fn interaction_handler(&self) -> &Arc<InteractionHandler> {
         &self.interaction_handler
-    }
-
-    /// Simulate tool calls that would be made by the Goose agent
-    /// In a real implementation, this would be integrated with the actual Goose agent
-    async fn simulate_tool_calls(
-        tx: &tokio::sync::mpsc::UnboundedSender<StreamMessage>,
-        request: &FixGenerationRequest,
-    ) -> Result<()> {
-        use crate::models::{ToolOperation, ToolResult};
-
-        // Simulate file reading tool calls for each incident
-        for (_i, incident) in request.incidents.iter().enumerate() {
-            let session_id = request.session_id.clone();
-            let request_id = Some(request.id.clone());
-
-            // Tool call start - reading the file
-            let tool_start = StreamMessage::new(
-                session_id.clone(),
-                request_id.clone(),
-                MessageType::ToolCall,
-                MessageContent::ToolCall {
-                    tool_name: "file_read".to_string(),
-                    operation: ToolOperation::Start,
-                    parameters: serde_json::json!({
-                        "file_path": incident.file_path,
-                        "line_number": incident.line_number,
-                        "context_lines": 5
-                    }),
-                    result: None,
-                },
-            );
-            let _ = tx.send(tool_start);
-
-            // Simulate some processing time
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-            // Tool call progress
-            let tool_progress = StreamMessage::new(
-                session_id.clone(),
-                request_id.clone(),
-                MessageType::ToolCall,
-                MessageContent::ToolCall {
-                    tool_name: "file_read".to_string(),
-                    operation: ToolOperation::Progress,
-                    parameters: serde_json::json!({}),
-                    result: None,
-                },
-            );
-            let _ = tx.send(tool_progress);
-
-            // Simulate more processing
-            tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
-
-            // Tool call completion with results
-            let tool_complete = StreamMessage::new(
-                session_id.clone(),
-                request_id.clone(),
-                MessageType::ToolCall,
-                MessageContent::ToolCall {
-                    tool_name: "file_read".to_string(),
-                    operation: ToolOperation::Complete,
-                    parameters: serde_json::json!({}),
-                    result: Some(ToolResult {
-                        success: true,
-                        data: Some(serde_json::json!({
-                            "file_content": format!("// Content around line {} in {}", incident.line_number, incident.file_path),
-                            "line_count": 100,
-                            "encoding": "utf-8",
-                            "incident_context": {
-                                "line_number": incident.line_number,
-                                "rule_id": incident.rule_id,
-                                "severity": incident.severity
-                            }
-                        })),
-                        error: None,
-                        execution_time_ms: 50,
-                        output_size_bytes: Some(1024),
-                    }),
-                },
-            );
-            let _ = tx.send(tool_complete);
-
-            // For complex incidents, simulate additional tool calls
-            if incident.severity.is_high_priority() {
-                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-                // Simulate dependency analysis tool call
-                let dep_analysis_start = StreamMessage::new(
-                    session_id.clone(),
-                    request_id.clone(),
-                    MessageType::ToolCall,
-                    MessageContent::ToolCall {
-                        tool_name: "dependency_analysis".to_string(),
-                        operation: ToolOperation::Start,
-                        parameters: serde_json::json!({
-                            "file_path": incident.file_path,
-                            "function_name": format!("function_at_line_{}", incident.line_number),
-                            "analysis_depth": "full"
-                        }),
-                        result: None,
-                    },
-                );
-                let _ = tx.send(dep_analysis_start);
-
-                tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
-
-                let dep_analysis_complete = StreamMessage::new(
-                    session_id.clone(),
-                    request_id.clone(),
-                    MessageType::ToolCall,
-                    MessageContent::ToolCall {
-                        tool_name: "dependency_analysis".to_string(),
-                        operation: ToolOperation::Complete,
-                        parameters: serde_json::json!({}),
-                        result: Some(ToolResult {
-                            success: true,
-                            data: Some(serde_json::json!({
-                                "dependencies": ["module_a", "module_b"],
-                                "dependents": ["client_x", "service_y"],
-                                "risk_level": "medium",
-                                "migration_complexity": "standard"
-                            })),
-                            error: None,
-                            execution_time_ms: 80,
-                            output_size_bytes: Some(512),
-                        }),
-                    },
-                );
-                let _ = tx.send(dep_analysis_complete);
-            }
-        }
-
-        // Simulate final validation tool call
-        let validation_start = StreamMessage::new(
-            request.session_id.clone(),
-            Some(request.id.clone()),
-            MessageType::ToolCall,
-            MessageContent::ToolCall {
-                tool_name: "fix_validation".to_string(),
-                operation: ToolOperation::Start,
-                parameters: serde_json::json!({
-                    "workspace_path": request.workspace_path,
-                    "fix_count": request.incidents.len(),
-                    "validation_level": "comprehensive"
-                }),
-                result: None,
-            },
-        );
-        let _ = tx.send(validation_start);
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let validation_complete = StreamMessage::new(
-            request.session_id.clone(),
-            Some(request.id.clone()),
-            MessageType::ToolCall,
-            MessageContent::ToolCall {
-                tool_name: "fix_validation".to_string(),
-                operation: ToolOperation::Complete,
-                parameters: serde_json::json!({}),
-                result: Some(ToolResult {
-                    success: true,
-                    data: Some(serde_json::json!({
-                        "validation_status": "passed",
-                        "fixes_validated": request.incidents.len(),
-                        "safety_score": 0.92,
-                        "recommendations": "All fixes are safe to apply"
-                    })),
-                    error: None,
-                    execution_time_ms: 100,
-                    output_size_bytes: Some(256),
-                }),
-            },
-        );
-        let _ = tx.send(validation_complete);
-
-        Ok(())
     }
 
     /// Cancel an active request

@@ -10,35 +10,24 @@ use tracing::{info, warn};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionLevel {
-    /// Execute tool automatically without user approval
     AutoApprove,
-    /// Ask user for approval before execution
     AskBefore,
-    /// Deny tool execution entirely
     Deny,
 }
 
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
-    /// Tool-specific permission settings
     pub tool_permissions: HashMap<String, PermissionLevel>,
-    /// Timeout for approval requests in seconds
     pub approval_timeout: u32,
-    /// Maximum file size for processing (bytes)
-    pub max_file_size: u64,
-    /// List of file patterns to exclude from processing
+    pub max_file_size: u64, 
     pub excluded_patterns: Vec<String>,
-    /// Socket file permissions (Unix only)
     pub socket_permissions: u32,
-    /// Workspace validation rules
     pub workspace_validation: WorkspaceValidationConfig,
 }
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceValidationConfig {
-    /// Whether to follow symbolic links
     pub follow_symlinks: bool,
-    /// Maximum workspace depth for traversal
     pub max_workspace_depth: u32,
 }
 
