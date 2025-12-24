@@ -46,3 +46,11 @@ docs/site/
 scratch/
 .local/
 .cache/
+
+# Goose AI session management
+*.db
+*.sqlite
+*.sqlite3
+session_data/
+goose_sessions/
+agent_data/

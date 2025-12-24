@@ -32,12 +32,10 @@ pub mod methods {
     pub const STREAM_ERROR: &str = "kaiak/stream/error";
     pub const STREAM_SYSTEM: &str = "kaiak/stream/system";
 
-    pub const SESSION_CREATE: &str = "kaiak/session/create";
-    pub const SESSION_TERMINATE: &str = "kaiak/session/terminate";
-    pub const SESSION_STATUS: &str = "kaiak/session/status";
-    pub const FIX_GENERATE: &str = "kaiak/fix/generate";
-    pub const FIX_CANCEL: &str = "kaiak/fix/cancel";
-    pub const INTERACTION_RESPOND: &str = "kaiak/interaction/respond";
+    // Three-endpoint API commands
+    pub const CONFIGURE: &str = "kaiak/configure";
+    pub const GENERATE_FIX: &str = "kaiak/generate_fix";
+    pub const DELETE_SESSION: &str = "kaiak/delete_session";
 }
 
 /// Helper functions for creating JSON-RPC errors
@@ -65,50 +63,12 @@ pub fn workspace_access_denied_error(workspace_path: &str) -> Error {
     )
 }
 
-/// Request/response types for session management
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateSessionRequest {
-    pub workspace_path: String,
-    pub session_name: Option<String>,
-    pub configuration: Option<Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateSessionResponse {
-    pub session_id: String,
-    pub status: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TerminateSessionRequest {
-    pub session_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TerminateSessionResponse {
-    pub session_id: String,
-    pub status: String,
-    pub message_count: u32,
-    pub terminated_at: String,
-}
-
-/// Request/response types for fix generation
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GenerateFixRequest {
-    pub session_id: String,
-    pub incidents: Vec<Value>,
-    pub migration_context: Option<Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GenerateFixResponse {
-    pub request_id: String,
-    pub session_id: String,
-    pub status: String,
-    pub incident_count: usize,
-    pub created_at: String,
-}
+// Re-export the new handler types for JSON-RPC
+pub use crate::handlers::{
+    ConfigureRequest, ConfigureResponse,
+    GenerateFixRequest, GenerateFixResponse,
+    DeleteSessionRequest, DeleteSessionResponse,
+};
 
 /// Streaming notification types
 #[derive(Debug, Serialize, Deserialize)]

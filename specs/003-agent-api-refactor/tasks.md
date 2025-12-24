@@ -22,10 +22,10 @@
 
 **Purpose**: Project initialization and Goose dependency integration
 
-- [ ] T001 Add Goose dependency to Cargo.toml as git dependency from github.com/block/goose
-- [ ] T002 [P] Update existing dependencies (tower-lsp, tokio, serde, anyhow, tracing) to versions compatible with Goose
-- [ ] T003 [P] Configure cargo clippy rules and formatting for Goose integration patterns
-- [ ] T004 [P] Update .gitignore to exclude Goose session database files and temporary artifacts
+- [x] T001 Add Goose dependency to Cargo.toml as git dependency from github.com/block/goose
+- [x] T002 [P] Update existing dependencies (tower-lsp, tokio, serde, anyhow, tracing) to versions compatible with Goose
+- [x] T003 [P] Configure cargo clippy rules and formatting for Goose integration patterns
+- [x] T004 [P] Update .gitignore to exclude Goose session database files and temporary artifacts
 
 ---
 

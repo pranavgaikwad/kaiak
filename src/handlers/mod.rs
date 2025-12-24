@@ -1,16 +1,10 @@
-// Handlers module for request processing logic
-// This will be populated during user story implementation phases
+// Handlers module for the three-endpoint API
 
-pub mod fix_generation;
-pub mod lifecycle;
-pub mod progress;
-pub mod streaming;
-pub mod modifications;
-pub mod interactions;
+pub mod configure;
+pub mod generate_fix;
+pub mod delete_session;
 
-pub use fix_generation::*;
-pub use lifecycle::*;
-pub use progress::*;
-pub use streaming::*;
-pub use modifications::*;
-pub use interactions::*;
+// Re-export handler types and functions
+pub use configure::{ConfigureHandler, ConfigureRequest, ConfigureResponse};
+pub use generate_fix::{GenerateFixHandler, GenerateFixRequest, GenerateFixResponse};
+pub use delete_session::{DeleteSessionHandler, DeleteSessionRequest, DeleteSessionResponse};

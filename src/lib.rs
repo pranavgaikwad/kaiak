@@ -52,6 +52,27 @@ pub enum KaiakError {
         #[from]
         source: serde_json::Error,
     },
+
+    #[error("Session in use: {session_id}")]
+    SessionInUse {
+        session_id: String,
+        in_use_since: Option<chrono::DateTime<chrono::Utc>>
+    },
+
+    #[error("Goose integration error: {message}")]
+    GooseIntegration { message: String, context: Option<String> },
+
+    #[error("Agent initialization failed: {message}")]
+    AgentInitialization { message: String },
+
+    #[error("Tool execution error: {message}")]
+    ToolExecution { message: String, tool_name: Option<String> },
+
+    #[error("User interaction timeout: {message}")]
+    InteractionTimeout { message: String },
+
+    #[error("File operation error: {message}")]
+    FileOperation { message: String, file_path: Option<String> },
 }
 
 impl KaiakError {
@@ -93,13 +114,65 @@ impl KaiakError {
         }
     }
 
+    /// Create a session in use error
+    pub fn session_in_use(session_id: impl Into<String>, in_use_since: Option<chrono::DateTime<chrono::Utc>>) -> Self {
+        Self::SessionInUse {
+            session_id: session_id.into(),
+            in_use_since,
+        }
+    }
+
+    /// Create a Goose integration error
+    pub fn goose_integration(message: impl Into<String>, context: Option<String>) -> Self {
+        Self::GooseIntegration {
+            message: message.into(),
+            context,
+        }
+    }
+
+    /// Create an agent initialization error
+    pub fn agent_initialization(message: impl Into<String>) -> Self {
+        Self::AgentInitialization {
+            message: message.into(),
+        }
+    }
+
+    /// Create a tool execution error
+    pub fn tool_execution(message: impl Into<String>, tool_name: Option<String>) -> Self {
+        Self::ToolExecution {
+            message: message.into(),
+            tool_name,
+        }
+    }
+
+    /// Create an interaction timeout error
+    pub fn interaction_timeout(message: impl Into<String>) -> Self {
+        Self::InteractionTimeout {
+            message: message.into(),
+        }
+    }
+
+    /// Create a file operation error
+    pub fn file_operation(message: impl Into<String>, file_path: Option<String>) -> Self {
+        Self::FileOperation {
+            message: message.into(),
+            file_path,
+        }
+    }
+
     /// Get error code for JSON-RPC responses
     pub fn error_code(&self) -> i32 {
         match self {
             KaiakError::Configuration { .. } => -32014,
             KaiakError::Session { .. } => -32003,
             KaiakError::SessionNotFound(_) => -32003,
+            KaiakError::SessionInUse { .. } => -32016, // NEW: for concurrent access blocking
             KaiakError::Agent { .. } => -32006,
+            KaiakError::AgentInitialization { .. } => -32006,
+            KaiakError::GooseIntegration { .. } => -32006,
+            KaiakError::ToolExecution { .. } => -32013,
+            KaiakError::InteractionTimeout { .. } => -32013,
+            KaiakError::FileOperation { .. } => -32012,
             KaiakError::Transport { .. } => -32001,
             KaiakError::Workspace { .. } => -32002,
             KaiakError::InvalidWorkspacePath(_) => -32002,
@@ -153,6 +226,40 @@ impl KaiakError {
             }
             KaiakError::Serialization { source } => {
                 format!("Data format error: {}", source)
+            }
+            KaiakError::SessionInUse { session_id, in_use_since } => {
+                if let Some(since) = in_use_since {
+                    format!("Session {} is currently in use since {}", session_id, since.format("%Y-%m-%d %H:%M:%S UTC"))
+                } else {
+                    format!("Session {} is currently in use by another client", session_id)
+                }
+            }
+            KaiakError::GooseIntegration { message, context } => {
+                if let Some(ctx) = context {
+                    format!("Goose integration error ({}): {}", ctx, message)
+                } else {
+                    format!("Goose integration error: {}", message)
+                }
+            }
+            KaiakError::AgentInitialization { message } => {
+                format!("Agent initialization failed: {}", message)
+            }
+            KaiakError::ToolExecution { message, tool_name } => {
+                if let Some(tool) = tool_name {
+                    format!("Tool execution error ({}): {}", tool, message)
+                } else {
+                    format!("Tool execution error: {}", message)
+                }
+            }
+            KaiakError::InteractionTimeout { message } => {
+                format!("User interaction timeout: {}", message)
+            }
+            KaiakError::FileOperation { message, file_path } => {
+                if let Some(path) = file_path {
+                    format!("File operation error ({}): {}", path, message)
+                } else {
+                    format!("File operation error: {}", message)
+                }
             }
         }
     }
