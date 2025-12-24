@@ -11,6 +11,12 @@ pub use goose::session::SessionType;
 // We'll use serde_json::Value as a flexible type for now
 pub type GooseModelConfig = serde_json::Value;
 
+/// Per-session agent configuration sent by clients via kaiak/configure endpoint
+///
+/// This is DIFFERENT from config::settings::ServerSettings which controls the server itself.
+/// AgentConfiguration is provided by IDE clients for each individual agent session.
+///
+/// Example: Client sends this in a kaiak/configure request to customize the agent for a specific project.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct AgentConfiguration {
     #[validate(nested)]
@@ -23,6 +29,11 @@ pub struct AgentConfiguration {
     pub permissions: PermissionConfig,
 }
 
+/// Per-session workspace configuration (sent by IDE client)
+///
+/// NOTE: This is DIFFERENT from config::settings::DefaultWorkspaceConfig
+/// - DefaultWorkspaceConfig = Server-wide defaults for all sessions
+/// - WorkspaceConfig = Client-specified workspace for this specific session
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct WorkspaceConfig {
     #[validate(custom(function = "validate_workspace_path"))]
@@ -135,6 +146,50 @@ impl Default for AgentConfiguration {
             },
             permissions: PermissionConfig::default(),
         }
+    }
+}
+
+impl AgentConfiguration {
+    /// Validate and optionally generate a new session ID if none provided
+    /// T029: Session validation for client-generated UUIDs
+    pub fn ensure_valid_session_id(&mut self) -> Result<(), String> {
+        // If session ID is empty, generate a new one
+        if self.session.id.is_empty() {
+            self.session.id = uuid::Uuid::new_v4().to_string();
+            return Ok(());
+        }
+
+        // Validate the provided session ID is a valid UUID
+        match uuid::Uuid::parse_str(&self.session.id) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(format!("Invalid UUID format for session ID: {}", self.session.id)),
+        }
+    }
+
+    /// Create a new configuration with a specific session ID
+    /// T029: Utility for creating configurations with validated session IDs
+    pub fn with_session_id(session_id: String) -> Result<Self, String> {
+        // Validate session ID is a proper UUID
+        uuid::Uuid::parse_str(&session_id)
+            .map_err(|_| format!("Invalid UUID format for session ID: {}", session_id))?;
+
+        let mut config = Self::default();
+        config.session.id = session_id;
+        Ok(config)
+    }
+
+    /// Get the session ID, ensuring it's valid
+    /// T029: Safe access to session ID with validation
+    pub fn validated_session_id(&self) -> Result<&str, String> {
+        if self.session.id.is_empty() {
+            return Err("Session ID is empty".to_string());
+        }
+
+        // Validate UUID format
+        uuid::Uuid::parse_str(&self.session.id)
+            .map_err(|_| format!("Invalid UUID format for session ID: {}", self.session.id))?;
+
+        Ok(&self.session.id)
     }
 }
 

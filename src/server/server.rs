@@ -55,7 +55,7 @@ impl KaiakServer {
     }
 
     /// Handle configure request
-    async fn handle_configure(&self, params: ConfigureRequest) -> JsonRpcResult<ConfigureResponse> {
+    async fn handle_configure(&self, _params: ConfigureRequest) -> JsonRpcResult<ConfigureResponse> {
         if let Err(e) = self.ensure_handlers_initialized().await {
             error!("Failed to initialize handlers: {}", e);
             return Err(create_error(
@@ -76,7 +76,7 @@ impl KaiakServer {
     }
 
     /// Handle delete session request
-    async fn handle_delete_session(&self, params: DeleteSessionRequest) -> JsonRpcResult<DeleteSessionResponse> {
+    async fn handle_delete_session(&self, _params: DeleteSessionRequest) -> JsonRpcResult<DeleteSessionResponse> {
         if let Err(e) = self.ensure_handlers_initialized().await {
             error!("Failed to initialize handlers: {}", e);
             return Err(create_error(
@@ -97,7 +97,7 @@ impl KaiakServer {
     }
 
     /// Handle fix generation request with streaming
-    async fn handle_generate_fix(&self, params: GenerateFixRequest) -> JsonRpcResult<GenerateFixResponse> {
+    async fn handle_generate_fix(&self, _params: GenerateFixRequest) -> JsonRpcResult<GenerateFixResponse> {
         if let Err(e) = self.ensure_handlers_initialized().await {
             error!("Failed to initialize handlers: {}", e);
             return Err(create_error(

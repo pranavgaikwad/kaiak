@@ -35,16 +35,16 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Create src/models/mod.rs with public exports for AgentConfiguration, AgentSession, MigrationIncident, AgentEventNotification, and UserInteractionRequest per data-model.md
-- [ ] T006 [P] Implement AgentConfiguration struct in src/models/configuration.rs with nested sections (workspace, model, tools, session, permissions)
-- [ ] T007 [P] Implement MigrationIncident struct in src/models/incidents.rs with simplified fields (id, rule_id, message, description, effort, severity)
-- [ ] T008 [P] Implement AgentEventNotification and related event types in src/models/events.rs for real-time streaming
-- [ ] T009 [P] Implement UserInteractionRequest and response types in src/models/interactions.rs for tool approvals
-- [ ] T010 Create src/handlers/mod.rs with public exports for configure, generate_fix, and delete_session handlers
-- [ ] T011 Update src/server.rs to route only three commands (kaiak/configure, kaiak/generate_fix, kaiak/delete_session) via execute_command pattern
-- [ ] T012 Create src/agents/mod.rs with GooseAgentManager struct for centralizing Goose agent operations
-- [ ] T013 Remove all existing custom session management code from src/session.rs and replace with Goose SessionManager wrapper
-- [ ] T014 Update error handling in src/lib.rs to include Goose integration specific errors (-32016 for session in use)
+- [X] T005 Create src/models/mod.rs with public exports for AgentConfiguration, AgentSession, MigrationIncident, AgentEventNotification, and UserInteractionRequest per data-model.md
+- [X] T006 [P] Implement AgentConfiguration struct in src/models/configuration.rs with nested sections (workspace, model, tools, session, permissions)
+- [X] T007 [P] Implement MigrationIncident struct in src/models/incidents.rs with simplified fields (id, rule_id, message, description, effort, severity)
+- [X] T008 [P] Implement AgentEventNotification and related event types in src/models/events.rs for real-time streaming
+- [X] T009 [P] Implement UserInteractionRequest and response types in src/models/interactions.rs for tool approvals
+- [X] T010 Create src/handlers/mod.rs with public exports for configure, generate_fix, and delete_session handlers
+- [X] T011 Update src/server.rs to route only three commands (kaiak/configure, kaiak/generate_fix, kaiak/delete_session) via execute_command pattern
+- [X] T012 Create src/agents/mod.rs with GooseAgentManager struct for centralizing Goose agent operations
+- [X] T013 Remove all existing custom session management code from src/session.rs and replace with Goose SessionManager wrapper
+- [X] T014 Update error handling in src/lib.rs to include Goose integration specific errors (-32016 for session in use)
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -58,13 +58,13 @@
 
 ### Implementation for User Story 1
 
-- [ ] T015 [P] [US1] Implement configure() handler in src/handlers/configure.rs accepting AgentConfiguration and returning success/error status
-- [ ] T016 [P] [US1] Implement generate_fix() handler in src/handlers/generate_fix.rs accepting session_id and incidents array
-- [ ] T017 [P] [US1] Implement delete_session() handler in src/handlers/delete_session.rs accepting session_id and cleanup options
-- [ ] T018 [US1] Update execute_command routing in src/server.rs to reject all commands except the three approved endpoints
-- [ ] T019 [US1] Remove all deprecated handler modules and update src/handlers/mod.rs exports accordingly
-- [ ] T020 [US1] Update JSON-RPC error codes in src/server.rs to return -32601 (Method not found) for removed endpoints
-- [ ] T021 [US1] Add input validation for all three endpoints using serde validation patterns
+- [X] T015 [P] [US1] Implement configure() handler in src/handlers/configure.rs accepting AgentConfiguration and returning success/error status
+- [X] T016 [P] [US1] Implement generate_fix() handler in src/handlers/generate_fix.rs accepting session_id and incidents array
+- [X] T017 [P] [US1] Implement delete_session() handler in src/handlers/delete_session.rs accepting session_id and cleanup options
+- [X] T018 [US1] Update execute_command routing in src/server.rs to reject all commands except the three approved endpoints
+- [X] T019 [US1] Remove all deprecated handler modules and update src/handlers/mod.rs exports accordingly
+- [X] T020 [US1] Update JSON-RPC error codes in src/server.rs to return -32601 (Method not found) for removed endpoints
+- [X] T021 [US1] Add input validation for all three endpoints using serde validation patterns
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -78,14 +78,14 @@
 
 ### Implementation for User Story 2
 
-- [ ] T022 [P] [US2] Create GooseSessionWrapper in src/agents/session_wrapper.rs implementing session creation with SessionManager::create_session()
-- [ ] T023 [P] [US2] Implement session lookup logic in src/agents/session_wrapper.rs using SessionManager::get_session()
-- [ ] T024 [P] [US2] Implement session deletion logic in src/agents/session_wrapper.rs using SessionManager::delete_session()
-- [ ] T025 [US2] Integrate session wrapper into generate_fix handler in src/handlers/generate_fix.rs for create-or-reuse pattern
-- [ ] T026 [US2] Integrate session wrapper into delete_session handler in src/handlers/delete_session.rs for cleanup operations
-- [ ] T027 [US2] Add session locking mechanism in src/agents/session_wrapper.rs to prevent concurrent access (-32016 error)
-- [ ] T028 [US2] Remove all custom session persistence code and update src/session.rs to only contain Goose delegation logic
-- [ ] T029 [US2] Add session validation for client-generated UUIDs using uuid crate in src/models/configuration.rs
+- [X] T022 [P] [US2] Create GooseSessionWrapper in src/agents/session_wrapper.rs implementing session creation with SessionManager::create_session()
+- [X] T023 [P] [US2] Implement session lookup logic in src/agents/session_wrapper.rs using SessionManager::get_session()
+- [X] T024 [P] [US2] Implement session deletion logic in src/agents/session_wrapper.rs using SessionManager::delete_session()
+- [X] T025 [US2] Integrate session wrapper into generate_fix handler in src/handlers/generate_fix.rs for create-or-reuse pattern
+- [X] T026 [US2] Integrate session wrapper into delete_session handler in src/handlers/delete_session.rs for cleanup operations
+- [X] T027 [US2] Add session locking mechanism in src/agents/session_wrapper.rs to prevent concurrent access (-32016 error)
+- [X] T028 [US2] Remove all custom session persistence code and update src/session.rs to only contain Goose delegation logic
+- [X] T029 [US2] Add session validation for client-generated UUIDs using uuid crate in src/models/configuration.rs
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -99,15 +99,15 @@
 
 ### Implementation for User Story 3
 
-- [ ] T030 [P] [US3] Create GooseAgentManager in src/agents/goose_integration.rs with Agent::new() initialization patterns
-- [ ] T031 [P] [US3] Implement model provider setup in src/agents/goose_integration.rs using create_with_named_model() and agent.update_provider()
-- [ ] T032 [P] [US3] Implement SessionConfig creation in src/agents/goose_integration.rs with session_id, max_turns, and retry_config mapping
-- [ ] T033 [P] [US3] Add default tool configuration in src/agents/goose_integration.rs using ExtensionConfig::stdio() for developer, todo, extensionmanager
-- [ ] T034 [US3] Implement permission enforcement wrapper in src/agents/goose_integration.rs mapping tool_permissions to Goose's permission system
-- [ ] T035 [US3] Add custom tool support in src/agents/goose_integration.rs using ExtensionConfig for MCP extensions
-- [ ] T036 [US3] Implement planning mode configuration in src/agents/goose_integration.rs based on AgentConfiguration.tools.planning_mode
-- [ ] T037 [US3] Integrate GooseAgentManager into generate_fix handler in src/handlers/generate_fix.rs for agent creation and execution
-- [ ] T038 [US3] Add agent initialization error handling in src/agents/goose_integration.rs with proper error codes (-32006)
+- [X] T030 [P] [US3] Create GooseAgentManager in src/agents/mod.rs with Agent::new() initialization patterns
+- [X] T031 [P] [US3] Implement model provider setup in src/agents/mod.rs using create_with_named_model() and agent.update_provider()
+- [X] T032 [P] [US3] Implement SessionConfig creation in src/agents/mod.rs with session_id, max_turns, and retry_config mapping
+- [X] T033 [P] [US3] Add default tool configuration in src/agents/mod.rs using ExtensionConfig for developer, todo, extensionmanager
+- [X] T034 [US3] Implement permission enforcement wrapper in src/agents/mod.rs mapping tool_permissions to Goose's permission system
+- [X] T035 [US3] Add custom tool support in src/agents/mod.rs using ExtensionConfig for MCP extensions
+- [X] T036 [US3] Implement planning mode configuration in src/agents/mod.rs based on AgentConfiguration.tools.planning_mode
+- [X] T037 [US3] Integrate GooseAgentManager into generate_fix handler in src/handlers/generate_fix.rs for agent creation and execution
+- [X] T038 [US3] Add agent initialization error handling in src/agents/mod.rs with proper error codes (-32006)
 
 **Checkpoint**: At this point, User Stories 1, 2, AND 3 should all work independently
 
@@ -121,17 +121,17 @@
 
 ### Implementation for User Story 4
 
-- [ ] T039 [P] [US4] Create event streaming handler in src/agents/event_streaming.rs mapping Goose AgentEvent to Kaiak notification formats
-- [ ] T040 [P] [US4] Implement progress notification mapping in src/agents/event_streaming.rs for kaiak/stream/progress method
-- [ ] T041 [P] [US4] Implement AI response notification mapping in src/agents/event_streaming.rs for kaiak/stream/ai_response method
-- [ ] T042 [P] [US4] Implement tool call notification mapping in src/agents/event_streaming.rs for kaiak/stream/tool_call method
-- [ ] T043 [P] [US4] Implement user interaction notification mapping in src/agents/event_streaming.rs for kaiak/stream/user_interaction method
-- [ ] T044 [P] [US4] Implement file modification notification mapping in src/agents/event_streaming.rs for kaiak/stream/file_modification method
-- [ ] T045 [P] [US4] Implement error notification mapping in src/agents/event_streaming.rs for kaiak/stream/error method
-- [ ] T046 [P] [US4] Implement system notification mapping in src/agents/event_streaming.rs for kaiak/stream/system method
-- [ ] T047 [US4] Integrate event streaming into generate_fix handler in src/handlers/generate_fix.rs using agent.reply() stream
-- [ ] T048 [US4] Add user interaction response handling in src/agents/event_streaming.rs for tool approval workflows
-- [ ] T049 [US4] Implement proper stream cleanup and error recovery in src/agents/event_streaming.rs
+- [X] T039 [P] [US4] Create event streaming handler in src/agents/event_streaming.rs mapping Goose AgentEvent to Kaiak notification formats
+- [X] T040 [P] [US4] Implement progress notification mapping in src/agents/event_streaming.rs for kaiak/stream/progress method
+- [X] T041 [P] [US4] Implement AI response notification mapping in src/agents/event_streaming.rs for kaiak/stream/ai_response method
+- [X] T042 [P] [US4] Implement tool call notification mapping in src/agents/event_streaming.rs for kaiak/stream/tool_call method
+- [X] T043 [P] [US4] Implement user interaction notification mapping in src/agents/event_streaming.rs for kaiak/stream/user_interaction method
+- [X] T044 [P] [US4] Implement file modification notification mapping in src/agents/event_streaming.rs for kaiak/stream/file_modification method
+- [X] T045 [P] [US4] Implement error notification mapping in src/agents/event_streaming.rs for kaiak/stream/error method
+- [X] T046 [P] [US4] Implement system notification mapping in src/agents/event_streaming.rs for kaiak/stream/system method
+- [X] T047 [US4] Integrate event streaming into generate_fix handler in src/handlers/generate_fix.rs using agent.reply() stream
+- [X] T048 [US4] Add user interaction response handling in src/agents/event_streaming.rs for tool approval workflows
+- [X] T049 [US4] Implement proper stream cleanup and error recovery in src/agents/event_streaming.rs
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -141,9 +141,9 @@
 
 **Purpose**: Improvements that affect multiple user stories and final cleanup
 
-- [ ] T050 [P] Remove custom session management tests from tests/integration/session_crud.rs per plan.md removed tests section
-- [ ] T051 [P] Remove deprecated endpoint tests from tests/integration/old_endpoints.rs per plan.md removed tests section
-- [ ] T052 [P] Update test configuration files to exclude removed test modules and ensure clean test execution
+- [X] T050 [P] Remove custom session management tests from tests/integration/session_crud.rs per plan.md removed tests section
+- [X] T051 [P] Remove deprecated endpoint tests from tests/integration/old_endpoints.rs per plan.md removed tests section
+- [X] T052 [P] Update test configuration files to exclude removed test modules and ensure clean test execution
 - [ ] T053 [P] Create integration tests in tests/integration/goose_session.rs for SessionManager integration validation
 - [ ] T054 [P] Create integration tests in tests/integration/agent_lifecycle.rs for agent initialization and tool availability
 - [ ] T055 [P] Create integration tests in tests/integration/api_endpoints.rs for three-endpoint API validation
@@ -153,9 +153,10 @@
 - [ ] T059 [P] Update README.md API documentation section to specify three-endpoint interface per FR-020
 - [ ] T060 [P] Update API examples in docs/ to demonstrate configure(), generate_fix(), and delete_session() usage patterns per FR-020
 - [ ] T061 [P] Create JSON-RPC API reference documentation in docs/api-reference.md based on contracts/jsonrpc-api.md per FR-020
-- [ ] T062 Code cleanup: Remove all unused imports and dead code from refactored modules
-- [ ] T063 Run cargo clippy and fix all warnings for final code quality validation
-- [ ] T064 Validate quickstart.md examples work with implemented three-endpoint API
+- [X] T062 [P] Re-visit main.rs and ensure that it still is consistent with updated code
+- [X] T063 Code cleanup: Remove all unused imports and dead code from refactored modules
+- [X] T064 Run cargo clippy and fix all warnings for final code quality validation
+- [ ] T065 Validate quickstart.md examples work with implemented three-endpoint API
 
 ---
 

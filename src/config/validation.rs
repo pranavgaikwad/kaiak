@@ -3,7 +3,7 @@
 use anyhow::Result;
 use std::path::Path;
 use tracing::{info, warn, error};
-use crate::config::settings::Settings;
+use crate::config::settings::ServerSettings;
 // Security config is imported via settings module
 
 /// Comprehensive configuration validator
@@ -26,7 +26,7 @@ impl ConfigurationValidator {
     }
 
     /// Validate complete configuration
-    pub fn validate_settings(&mut self, settings: &Settings) -> Result<()> {
+    pub fn validate_settings(&mut self, settings: &ServerSettings) -> Result<()> {
         info!("Starting configuration validation");
 
         // Validate server configuration
@@ -110,7 +110,7 @@ impl ConfigurationValidator {
         }
     }
 
-    fn validate_ai_config(&mut self, ai_config: &crate::config::settings::AiConfig) {
+    fn validate_ai_config(&mut self, ai_config: &crate::config::settings::AiDefaultsConfig) {
         // Validate timeout
         if ai_config.timeout < 30 {
             self.warnings.push("AI timeout is very short (< 30s). May cause premature failures".to_string());
@@ -127,7 +127,7 @@ impl ConfigurationValidator {
     }
 
 
-    fn validate_workspace_config(&mut self, workspace_config: &crate::config::settings::WorkspaceConfig) {
+    fn validate_workspace_config(&mut self, workspace_config: &crate::config::settings::DefaultWorkspaceConfig) {
         // Validate exclude patterns
         if workspace_config.exclude_patterns.is_empty() {
             self.warnings.push("No workspace exclude patterns defined. Consider adding patterns for build artifacts, dependencies, etc.".to_string());
@@ -179,7 +179,7 @@ impl ConfigurationValidator {
         }
     }
 
-    fn validate_environment_variables(&mut self, _settings: &Settings) {
+    fn validate_environment_variables(&mut self, _settings: &ServerSettings) {
         // Check for required environment variables
         let required_env_vars = [
             ("OPENAI_API_KEY", "OpenAI API access"),
@@ -188,7 +188,7 @@ impl ConfigurationValidator {
 
         let mut has_any_key = false;
 
-        for (env_var, description) in required_env_vars {
+        for (env_var, _description) in required_env_vars {
             if std::env::var(env_var).is_ok() {
                 has_any_key = true;
                 info!("Found environment variable: {}", env_var);
@@ -251,7 +251,7 @@ impl ConfigurationValidator {
 }
 
 /// Quick validation function for use in main application
-pub fn validate_configuration(settings: &Settings, strict: bool) -> Result<()> {
+pub fn validate_configuration(settings: &ServerSettings, strict: bool) -> Result<()> {
     let mut validator = ConfigurationValidator::new(strict);
     validator.validate_settings(settings)
 }
@@ -261,8 +261,8 @@ mod tests {
     use super::*;
     use crate::config::settings::*;
 
-    fn create_test_settings() -> Settings {
-        Settings {
+    fn create_test_settings() -> ServerSettings {
+        ServerSettings {
             server: ServerConfig {
                 transport: "stdio".to_string(),
                 socket_path: Some("/tmp/kaiak.sock".to_string()),

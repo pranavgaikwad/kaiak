@@ -6,7 +6,6 @@ use uuid::Uuid;
 use validator::Validate;
 
 use crate::models::incidents::MigrationIncident;
-use crate::models::events::AgentEventNotification;
 use crate::agents::GooseAgentManager;
 use crate::KaiakResult;
 
@@ -190,26 +189,69 @@ impl GenerateFixHandler {
         Ok(())
     }
 
-    /// Initiate agent processing (User Story 1 stub - full implementation in User Story 3)
+    /// Initiate agent processing with Goose session management
+    /// User Story 2: Session creation/lookup integration
+    /// User Story 3: Full agent execution (upcoming)
     async fn initiate_agent_processing(&self, request_id: &str, request: &GenerateFixRequest) -> KaiakResult<()> {
         debug!("Initiating agent processing for request: {}", request_id);
 
-        // For User Story 1, we validate the API surface and prepare for agent execution
-        // The actual Goose agent integration will be implemented in User Story 3
+        // User Story 2: Use Goose SessionManager for session management
+        // Try to lock the session to prevent concurrent access
+        match self.agent_manager.lock_session(&request.session_id).await {
+            Ok(_) => {
+                debug!("Successfully locked session: {}", request.session_id);
+            }
+            Err(e) => {
+                error!("Failed to lock session {}: {}", request.session_id, e);
+                return Err(e);
+            }
+        }
 
-        // Validate session exists or can be created (this will be fully implemented in User Story 2)
-        // For now, just log that we would create/get session
-        debug!("Would create or get session: {}", request.session_id);
+        // Create a default configuration for session creation if needed
+        let config = crate::models::configuration::AgentConfiguration::default();
 
-        // Validate workspace is accessible (this will use actual workspace validation in User Story 2)
-        debug!("Would validate workspace accessibility for session: {}", request.session_id);
+        // Get or create session using Goose SessionManager
+        let session_info = match self.agent_manager.get_or_create_session(&request.session_id, &config).await {
+            Ok(session_info) => {
+                debug!("Session ready for processing: {} (workspace: {:?})",
+                       request.session_id,
+                       session_info.configuration.workspace.working_dir);
+                session_info
+            }
+            Err(e) => {
+                error!("Failed to get or create session {}: {}", request.session_id, e);
+                // Unlock session on failure
+                if let Err(unlock_err) = self.agent_manager.unlock_session(&request.session_id).await {
+                    warn!("Failed to unlock session after error: {}", unlock_err);
+                }
+                return Err(e);
+            }
+        };
 
-        // Prepare incident processing (actual processing in User Story 3)
-        debug!("Prepared {} incidents for processing", request.incidents.len());
+        // Validate workspace is accessible using actual session configuration
+        let workspace_path = &session_info.configuration.workspace.working_dir;
+        if !workspace_path.exists() {
+            error!("Workspace directory does not exist: {:?}", workspace_path);
+            self.agent_manager.unlock_session(&request.session_id).await.ok();
+            return Err(crate::KaiakError::workspace(
+                "Workspace directory does not exist".to_string(),
+                Some(workspace_path.to_string_lossy().to_string())
+            ));
+        }
 
-        // For now, return success to indicate the API accepts the request
-        // User Story 3 will implement actual agent execution with streaming responses
-        info!("Request {} accepted for future processing", request_id);
+        // Log incident processing preparation
+        debug!("Prepared {} incidents for processing in workspace: {:?}",
+               request.incidents.len(), workspace_path);
+
+        // User Story 2 Achievement: Session is now managed by Goose SessionManager
+        // User Story 3: Will implement actual agent execution with streaming responses
+        info!("Request {} accepted with Goose session management", request_id);
+
+        // For User Story 2, we unlock the session as we're not actually processing yet
+        // User Story 3 will keep the lock during actual agent execution
+        if let Err(unlock_err) = self.agent_manager.unlock_session(&request.session_id).await {
+            warn!("Failed to unlock session after preparation: {}", unlock_err);
+        }
 
         Ok(())
     }

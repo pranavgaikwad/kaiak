@@ -7,7 +7,6 @@ use anyhow::Result;
 
 pub mod config;
 pub mod server;
-pub mod goose;
 pub mod models;
 pub mod handlers;
 pub mod agents;
