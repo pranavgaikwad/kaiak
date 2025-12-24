@@ -5,6 +5,8 @@ Auto-generated from all feature plans. Last updated: 2025-12-22
 ## Active Technologies
 - Rust 1.75+ (stable toolchain) + goose (git dependency), tower-lsp, tokio, serde, anyhow, tracing (002-agent-implementation)
 - N/A (no data persistence beyond session management for this feature) (002-agent-implementation)
+- Rust 1.75+ (stable toolchain) + Goose (git dependency), tower-lsp, tokio, serde, anyhow, tracing (003-agent-api-refactor)
+- Delegated to Goose's SQLite session management (no custom persistence) (003-agent-api-refactor)
 
 - Rust 1.75+ (stable toolchain) + Goose (github.com/block/goose), JSON-RPC compatible library, tokio async runtime (001-kaiak-skeleton)
 
@@ -24,6 +26,7 @@ cargo test [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECH
 Rust 1.75+ (stable toolchain): Follow standard conventions
 
 ## Recent Changes
+- 003-agent-api-refactor: Added Rust 1.75+ (stable toolchain) + Goose (git dependency), tower-lsp, tokio, serde, anyhow, tracing
 - 002-agent-implementation: Added Rust 1.75+ (stable toolchain) + goose (git dependency), tower-lsp, tokio, serde, anyhow, tracing
 
 - 001-kaiak-skeleton: Added Rust 1.75+ (stable toolchain) + Goose (github.com/block/goose), JSON-RPC compatible library, tokio async runtime

@@ -5,6 +5,7 @@ release/
 *.rs.bk
 *.rlib
 *.prof*
+.trunk/
 
 # IDE and editors
 .vscode/

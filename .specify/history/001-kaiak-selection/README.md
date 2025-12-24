@@ -4,7 +4,7 @@
 ## Initial commits using speckit
 
 - Begin research
-      ```text
+      ```md
       I have added the Goose project to your context at ~/Projects/goose/, which was cloned from 
       `https://github.com/block/goose`. Goose is an open-source, highly customizable, and flexible AI agent designed for general-purpose coding. I have also included the directory ~/Projects/editor-extensions/vscode/core, which contains a VSCode extension we developed to help users modernize and migrate their source code to newer technologies using AI agents. This IDE extension utilizes a static source code analysis tool to scan the currently open workspace and identify migration issues. Each occurrence of a migration issue in the source code is called an incident. Users can select a specific incident in a file, all issues within a file, or multiple incidents of the same issue across different files. The IDE then forwards this data to the external agentic/ module. You also have access to the agentic/ module’s source code at ~/Projects/editor-extensions/agentic/. Common APIs are provided by the shared/ module, included in the context as well. The agentic/ module implements a LangGraph agent that communicates with the vscode/core extension. The vscode/core extension manages the state of the agentic workflow and interfaces with the webview, where AI messages are displayed in a chat format. The AI workflow is not permitted to make file changes directly; instead, it sends a special message to the user and *waits* for user interaction to be resolved. The webview source code is located in ~/Projects/editor-extensions/webview-ui/.
 
@@ -14,12 +14,12 @@
       ```
 
 - Run speckit.constitution to establish baseline
-      ```text
+      ```md
       Now that you are familiar with the problem statement, let’s begin work on this Rust server, which we will refer to as “Kaiak” from now on. We should focus on coding standards, code quality, testing practices, and above all, ensuring a consistent user experience. It is essential that our user experience remains user-friendly—debugging should be straightforward, progress should be clearly shown during long-running tasks, errors must be communicated effectively, and comprehensive logging should be in place. We will use GitHub Actions for continuous integration, with actions running on pull requests to execute tests. For testing, we will prioritize end-to-end and integration tests over smaller unit tests. However, more granular unit tests should still be written for complex functions or critical business logic within the codebase. Comments in the source code should be reserved for complex functions or important portions of the code, while unnecessary or verbose comments for trivial sections should be avoided.
       ```
 
 - Run speckit.specify to establish spec for the first skeleton feature
-      ```text
+      ```md
       Let's begin developing the skeleton for our server, "Kaiak." Kaiak will be a standalone server designed to run the Goose agent and will support the following capabilities:
 
       1. Accept fix generation requests from the IDE extension for one or more incidents within the workspace.
@@ -32,7 +32,7 @@
       ```
 
 - Run speckit.plan to generate a technical plan
-      ```text
+      ```md
       Kaiak will be a standalone server developed in Rust. It will utilize `Goose (github.com/block/goose)` as a dependency, leveraging its public APIs to create, manage, and execute the Goose AI agent. Communication with clients (such as IDEs) will occur via LSP-style JSON-RPC messages (including content length and type) over sockets, named pipes, or optionally stdio. Where feasible, Kaiak may be distributed as a WebAssembly module or binary executable. Continuous integration will be managed with GitHub Actions to enforce pull request checks, complemented by local scripts allowing developers to run the same CI workflows. We will prioritize end-to-end and integration testing over unit or small isolated tests. Kaiak will minimize external dependencies, while avoiding re-inventing solutions for well-established needs such as socket communication and JSON-RPC implementations compatible with VSCode’s protocol.
       ```
 
@@ -47,7 +47,7 @@
 
 
 
-```text
+```md
 We have implemented our feature 001-kaiak-skeleton, establishing a complete Rust server capable of running the Goose agent.  Comprehensive specifications, plans, tasks, and related documents were created under the specs/001-kaiak-skeleton directory. I would now like to make some revisions to the feature based on feedback received during review:
 
 ## Major changes affecting multiple files

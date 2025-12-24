@@ -15,34 +15,47 @@
 The Konveyor VSCode extension ecosystem consists of multiple interconnected components:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    VSCode Extension Ecosystem                   │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐│
-│  │   vscode/core   │◄──►│   webview-ui    │    │     shared      ││
-│  │                 │    │                 │    │                 ││
-│  │  • Extension    │    │  • React UI     │    │  • Common APIs ││
-│  │    logic        │    │  • Chat interface   │  • Type defs   ││
-│  │  • Kai analyzer │    │  • Batch review │    │  • Messages    ││
-│  │  • State mgmt   │    │  • User interactions   │  • Utilities  ││
-│  │  • Webview      │    │  • Profile mgmt │    │                 ││
-│  │    orchestration│    │                 │    │                 ││
-│  └─────────┬───────┘    └─────────────────┘    └─────────────────┘│
-├───────────┼─────────────────────────────────────────────────────────┤
-│           │                Current AI Agent                       │
-│  ┌─────────▼───────┐                 ┌─────────────────┐          │
-│  │   agentic/      │                 │     Kaiak       │          │
-│  │                 │    (TO BE       │   (FUTURE)      │          │
-│  │  • LangGraph    │    REPLACED     │                 │          │
-│  │    workflows    │      BY)        │  • Rust/Goose   │          │
-│  │  • Interactive ├─────────────────►│  • JSON-RPC     │          │
-│  │    agent        │                 │  • Session mgmt │          │
-│  │  • Tool system │                 │  • Streaming    │          │
-│  │  • Streaming    │                 │  • File safety │          │
-│  │    events       │                 │                 │          │
-│  │  • File mods    │                 │                 │          │
-│  └─────────────────┘                 └─────────────────┘          │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      VSCode Extension Ecosystem                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐      │
+│  │   vscode/core   │◄──►│   webview-ui    │    │     shared      │      │
+│  │                 │    │                 │    │                 │      │
+│  │  • Extension    │    │  • React UI     │    │  • Common APIs │      │
+│  │    logic        │    │  • Chat interface   │  • Type defs   │      │
+│  │  • Kai analyzer │    │  • Batch review │    │  • Messages    │      │
+│  │  • State mgmt   │    │  • User interactions   │  • Utilities  │      │
+│  │  • Webview      │    │  • Profile mgmt │    │                 │      │
+│  │    orchestration│    │                 │    │                 │      │
+│  └─────────┬───────┘    └─────────────────┘    └─────────────────┘      │
+├───────────┼─────────────────────────────────────────────────────────────┤
+│           │                    AI Agent Layer                          │
+│  ┌─────────▼───────┐              ┌──────────────────────────────────┐  │
+│  │   agentic/      │              │         kaiak_ts/               │  │
+│  │                 │   (TO BE     │                                 │  │
+│  │  • LangGraph    │   REPLACED   │  • TypeScript adapter          │  │
+│  │    workflows    │     BY)      │  • Process management          │  │
+│  │  • Interactive ├──────────────►│  • JSON-RPC client             │  │
+│  │    agent        │              │  • Stream handling             │  │
+│  │  • Tool system │              │  • Error recovery              │  │
+│  │  • Streaming    │              │  • API compatibility           │  │
+│  │    events       │              │           │                    │  │
+│  │  • File mods    │              └───────────┼────────────────────┘  │
+│  └─────────────────┘                          │                       │
+│                                               │ JSON-RPC               │
+│                                               ▼                       │
+│                                    ┌─────────────────┐                 │
+│                                    │     Kaiak       │                 │
+│                                    │   (Rust Process)│                 │
+│                                    │                 │                 │
+│                                    │  • Rust/Goose   │                 │
+│                                    │  • JSON-RPC     │                 │
+│                                    │  • Session mgmt │                 │
+│                                    │  • Streaming    │                 │
+│                                    │  • File safety │                 │
+│                                    │  • MCP tools    │                 │
+│                                    └─────────────────┘                 │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
