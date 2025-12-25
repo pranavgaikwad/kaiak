@@ -260,7 +260,7 @@ impl TestProvider {
     /// Get the recordings directory path
     fn get_recordings_directory() -> Result<PathBuf> {
         let current_dir = env::current_dir()?;
-        let recordings_dir = current_dir.join("tests").join("recordings");
+        let recordings_dir = current_dir.join("tests").join("data").join("recordings");
         Ok(recordings_dir)
     }
 

@@ -52,6 +52,15 @@ jobs:
     - name: Run integration tests
       run: cargo test --test integration --all-features
 
+    - name: Run endpoint-specific integration tests
+      env:
+        KAIAK_TEST_MODE: replay
+      run: |
+        echo "Running focused endpoint tests with replay mode..."
+        cargo test --test test_configure_endpoint --all-features
+        cargo test --test test_generate_fix_endpoint --all-features
+        cargo test --test test_delete_session_endpoint --all-features
+
     - name: Security audit
       run: |
         cargo install cargo-audit

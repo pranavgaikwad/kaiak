@@ -144,19 +144,19 @@
 - [X] T050 [P] Remove custom session management tests from tests/integration/session_crud.rs per plan.md removed tests section
 - [X] T051 [P] Remove deprecated endpoint tests from tests/integration/old_endpoints.rs per plan.md removed tests section
 - [X] T052 [P] Update test configuration files to exclude removed test modules and ensure clean test execution
-- [ ] T053 [P] Create integration tests in tests/integration/goose_session.rs for SessionManager integration validation
-- [ ] T054 [P] Create integration tests in tests/integration/agent_lifecycle.rs for agent initialization and tool availability
-- [ ] T055 [P] Create integration tests in tests/integration/api_endpoints.rs for three-endpoint API validation
-- [ ] T056 [P] Create integration tests in tests/integration/event_streaming.rs for Goose event to Kaiak notification mapping
-- [ ] T057 [P] Update development setup instructions in README.md for Goose dependency requirements
-- [ ] T058 [P] Add performance benchmarking in tests/benchmark/ for startup time and memory usage improvements
-- [ ] T059 [P] Update README.md API documentation section to specify three-endpoint interface per FR-020
-- [ ] T060 [P] Update API examples in docs/ to demonstrate configure(), generate_fix(), and delete_session() usage patterns per FR-020
-- [ ] T061 [P] Create JSON-RPC API reference documentation in docs/api-reference.md based on contracts/jsonrpc-api.md per FR-020
+- [X] T053 [P] Create integration tests in tests/integration/goose_session.rs for SessionManager integration validation
+- [X] T054 [P] Create integration tests in tests/integration/agent_lifecycle.rs for agent initialization and tool availability
+- [X] T055 [P] Create integration tests in tests/integration/api_endpoints.rs for API validation
+- [X] T056 [P] Create integration tests in tests/integration/event_streaming.rs for Goose event to Kaiak notification mapping
+- [X] T057 [P] Update development setup instructions in README.md for Goose dependency requirements
+- [X] T058 [P] Add performance benchmarking in tests/benchmark/ for startup time and memory usage improvements
+- [X] T059 [P] Update README.md API documentation section to specify API interface per FR-020
+- [X] T060 [P] Update API examples in docs/ to demonstrate configure(), generate_fix(), and delete_session() usage patterns per FR-020
+- [X] T061 [P] Create JSON-RPC API reference documentation in docs/api-reference.md based on contracts/jsonrpc-api.md per FR-020
 - [X] T062 [P] Re-visit main.rs and ensure that it still is consistent with updated code
 - [X] T063 Code cleanup: Remove all unused imports and dead code from refactored modules
 - [X] T064 Run cargo clippy and fix all warnings for final code quality validation
-- [ ] T065 Validate quickstart.md examples work with implemented three-endpoint API
+- [X] T065 Validate quickstart.md examples work with implemented API
 
 ---
 

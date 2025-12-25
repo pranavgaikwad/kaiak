@@ -29,12 +29,25 @@ kaiak --version
 ```
 
 #### Option 2: Build from Source
+
+**Requirements**:
+- Rust 1.75+ (stable toolchain)
+- Git (for Goose dependency from GitHub)
+- OpenSSL development libraries
+
 ```bash
+# Clone the repository
 git clone https://github.com/pranavgaikwad/kaiak.git
 cd kaiak
+
+# Build with release optimizations
 cargo build --release
+
+# Install to system
 cargo install --path .
 ```
+
+**Note**: Kaiak depends on [Goose](https://github.com/block/goose) as a git dependency. The build process will automatically fetch Goose from GitHub during compilation.
 
 ### Basic Setup
 
@@ -62,45 +75,67 @@ kaiak serve --socket /tmp/kaiak.sock
 
 ### First Fix Generation
 
-Create a test workspace and run Kaiak:
+Kaiak provides a simplified three-endpoint API for agent operations:
+- **kaiak/configure** - Configure agent for a session
+- **kaiak/generate_fix** - Generate fixes for migration incidents
+- **kaiak/delete_session** - Clean up agent session
+
+**Step 1**: Start the server
 
 ```bash
-# Navigate to your project
-cd /path/to/your/project
-
-# Start server for this workspace
-kaiak serve --stdio --workspace $(pwd)
+# Start server with stdio transport (recommended for IDE integration)
+kaiak serve --stdio
 ```
 
-Send a JSON-RPC request for fix generation:
+**Step 2**: Configure the agent (one-time per session)
 
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "kaiak/session/create",
+  "method": "kaiak/configure",
   "params": {
-    "workspace_path": "/path/to/your/project",
-    "session_name": "migration-session"
+    "workspace": {
+      "working_dir": "/path/to/your/project",
+      "include_patterns": ["**/*.rs", "**/*.toml"],
+      "exclude_patterns": ["target/**", "**/*.bak"]
+    },
+    "model": {
+      "provider": "openai",
+      "model": "gpt-4"
+    },
+    "tools": {
+      "enabled_extensions": ["developer", "todo"],
+      "custom_tools": [],
+      "planning_mode": false
+    },
+    "permissions": {
+      "tool_permissions": {
+        "file_write": "approve",
+        "file_read": "allow",
+        "shell_command": "deny"
+      }
+    }
   },
   "id": 1
 }
 ```
 
+**Step 3**: Generate fixes for identified incidents
+
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "kaiak/fix/generate",
+  "method": "kaiak/generate_fix",
   "params": {
-    "session_id": "your-session-id",
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
     "incidents": [
       {
         "id": "issue-1",
         "rule_id": "deprecated-api",
-        "file_path": "src/main.rs",
-        "line_number": 42,
-        "severity": "warning",
-        "description": "Deprecated API usage",
-        "message": "old_method() is deprecated, use new_method()"
+        "message": "old_method() is deprecated, use new_method()",
+        "description": "Deprecated API usage detected",
+        "effort": "low",
+        "severity": "warning"
       }
     ]
   },
@@ -108,7 +143,31 @@ Send a JSON-RPC request for fix generation:
 }
 ```
 
-Monitor real-time progress updates and approve/reject proposed file modifications through streaming notifications.
+**Step 4**: Monitor real-time progress via streaming notifications
+
+The agent streams events as it works:
+- **kaiak/stream/progress** - Execution progress updates
+- **kaiak/stream/ai_response** - AI model responses
+- **kaiak/stream/tool_call** - Tool execution status
+- **kaiak/stream/user_interaction** - Approval prompts for file modifications
+
+**Step 5**: Clean up when done
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "kaiak/delete_session",
+  "params": {
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "cleanup_options": {
+      "force": false,
+      "cleanup_temp_files": true,
+      "preserve_logs": true
+    }
+  },
+  "id": 3
+}
+```
 
 ## Architecture
 
@@ -266,28 +325,33 @@ cargo test quickstart_validation
 ```
 src/
 ├── main.rs              # Entry point and CLI argument parsing
+├── lib.rs               # Library exports and error types
 ├── server/              # Core server implementation
-│   ├── transport.rs     # IPC transport layer
-│   ├── jsonrpc.rs       # JSON-RPC protocol handling
-│   └── server.rs        # Main server orchestration
-├── goose/               # Goose agent integration
-│   ├── agent.rs         # Agent lifecycle management
-│   ├── session.rs       # Session state management
-│   └── monitoring.rs    # Performance monitoring
+│   ├── transport.rs     # IPC transport layer (stdio/socket)
+│   ├── jsonrpc.rs       # JSON-RPC protocol types and error codes
+│   ├── server.rs        # Main LSP server orchestration
+│   └── mod.rs           # Server module exports
+├── agents/              # Goose agent integration layer
+│   ├── mod.rs           # GooseAgentManager for agent lifecycle
+│   ├── session_wrapper.rs  # Session management with Goose SessionManager
+│   └── event_streaming.rs  # Event mapping (Goose → Kaiak notifications)
 ├── models/              # Data models and entities
-│   ├── session.rs       # Session models
-│   ├── request.rs       # Fix generation requests
-│   ├── incident.rs      # Code incident models
-│   └── messages.rs      # Stream message types
-├── handlers/            # Request processing logic
-│   ├── fix_generation.rs # Core fix generation
-│   ├── lifecycle.rs     # Agent lifecycle operations
-│   ├── streaming.rs     # Real-time streaming
-│   └── interactions.rs  # User interaction handling
-└── config/              # Configuration management
-    ├── settings.rs      # Configuration structures
+│   ├── configuration.rs # AgentConfiguration (per-session config)
+│   ├── incidents.rs     # MigrationIncident models
+│   ├── events.rs        # AgentEventNotification types
+│   ├── interactions.rs  # UserInteractionRequest types
+│   ├── session.rs       # Session type re-exports
+│   └── mod.rs           # Model exports
+├── handlers/            # Three-endpoint request handlers
+│   ├── configure.rs     # kaiak/configure handler
+│   ├── generate_fix.rs  # kaiak/generate_fix handler
+│   ├── delete_session.rs # kaiak/delete_session handler
+│   └── mod.rs           # Handler exports
+└── config/              # Server configuration management
+    ├── settings.rs      # ServerSettings (server-wide config)
     ├── security.rs      # Security hardening
-    └── validation.rs    # Configuration validation
+    ├── validation.rs    # Configuration validation
+    └── mod.rs           # Config module and logging setup
 ```
 
 ## Contributing
@@ -314,22 +378,9 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## License
 
-This project is dual-licensed under either:
-
-- **MIT License** ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 - **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
 
-at your option.
-
-## Support
-
-- **Documentation**: [docs.kaiak.dev](https://docs.kaiak.dev)
-- **Issues**: [GitHub Issues](https://github.com/pranavgaikwad/kaiak/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/pranavgaikwad/kaiak/discussions)
 
 ## Acknowledgments
 
-- **Goose AI Agent**: Core AI processing capabilities
-- **Tower LSP**: Robust Language Server Protocol implementation
-- **Tokio**: Asynchronous runtime foundation
-- **The Rust Community**: For excellent tooling and libraries
+- **Goose AI Agent**: Core AI processing capabilities are provided through [Goose](https://github.com/block/goose).

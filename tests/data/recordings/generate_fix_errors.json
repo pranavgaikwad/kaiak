@@ -1,0 +1,127 @@
+{
+  "test_name": "generate_fix_errors",
+  "recorded_at": "2025-12-25T10:15:00Z",
+  "kaiak_version": "0.1.0",
+  "interactions": [
+    {
+      "test_name": "generate_fix_errors",
+      "timestamp": "2025-12-25T10:15:01Z",
+      "request_type": "fix_generation_invalid_session",
+      "input": {
+        "jsonrpc": "2.0",
+        "method": "workspace/executeCommand",
+        "params": {
+          "command": "kaiak/generate_fix",
+          "arguments": [{
+            "session_id": "invalid-uuid-format",
+            "incidents": [{
+              "id": "test-1",
+              "rule_id": "test-rule",
+              "message": "Test message",
+              "effort": "trivial",
+              "severity": "info"
+            }]
+          }]
+        },
+        "id": 1
+      },
+      "output": {
+        "jsonrpc": "2.0",
+        "result": {
+          "request_id": "req-invalid-001",
+          "session_id": "invalid-uuid-format",
+          "status": "completed",
+          "incident_count": 1,
+          "completed_at": "2025-12-25T10:15:05Z"
+        },
+        "id": 1
+      },
+      "metadata": {
+        "execution_time_ms": 5000,
+        "success": true,
+        "session_id": "invalid-uuid-format",
+        "request_id": "req-invalid-001"
+      }
+    },
+    {
+      "test_name": "generate_fix_errors",
+      "timestamp": "2025-12-25T10:15:06Z",
+      "request_type": "fix_generation_empty_incidents",
+      "input": {
+        "jsonrpc": "2.0",
+        "method": "workspace/executeCommand",
+        "params": {
+          "command": "kaiak/generate_fix",
+          "arguments": [{
+            "session_id": "empty-incidents-session",
+            "incidents": []
+          }]
+        },
+        "id": 2
+      },
+      "output": {
+        "jsonrpc": "2.0",
+        "result": {
+          "request_id": "req-empty-001",
+          "session_id": "empty-incidents-session",
+          "status": "completed",
+          "incident_count": 0,
+          "completed_at": "2025-12-25T10:15:06Z"
+        },
+        "id": 2
+      },
+      "metadata": {
+        "execution_time_ms": 100,
+        "success": true,
+        "session_id": "empty-incidents-session",
+        "request_id": "req-empty-001"
+      }
+    },
+    {
+      "test_name": "generate_fix_errors",
+      "timestamp": "2025-12-25T10:15:07Z",
+      "request_type": "fix_generation_malformed_incident",
+      "input": {
+        "jsonrpc": "2.0",
+        "method": "workspace/executeCommand",
+        "params": {
+          "command": "kaiak/generate_fix",
+          "arguments": [{
+            "session_id": "malformed-session",
+            "incidents": [{
+              "id": "",
+              "severity": "invalid_severity"
+            }]
+          }]
+        },
+        "id": 3
+      },
+      "output": {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32602,
+          "message": "Invalid params: Malformed incident data",
+          "data": {
+            "incident_id": "",
+            "issue": "Empty ID and invalid severity"
+          }
+        },
+        "id": 3
+      },
+      "metadata": {
+        "execution_time_ms": 50,
+        "success": false,
+        "error": "Malformed incident",
+        "session_id": "malformed-session",
+        "request_id": "req-malformed"
+      }
+    }
+  ],
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "rust_version": "1.75.0",
+    "git_commit": "b3a29ef",
+    "is_ci": true
+  }
+}

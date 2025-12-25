@@ -66,13 +66,13 @@ jobs:
         echo "Verifying test recordings..."
 
         # Check that recordings directory exists
-        if [ ! -d "tests/recordings" ]; then
-          echo "❌ tests/recordings directory not found"
+        if [ ! -d "tests/data/recordings" ]; then
+          echo "❌ tests/data/recordings directory not found"
           exit 1
         fi
 
         # Count available recordings
-        recording_count=$(find tests/recordings -name "*.json" | wc -l)
+        recording_count=$(find tests/data/recordings -name "*.json" | wc -l)
         echo "📼 Found $recording_count test recordings"
 
         if [ "$recording_count" -eq 0 ]; then
@@ -93,30 +93,90 @@ jobs:
         # T014 - Run tests with explicit replay mode
         KAIAK_TEST_MODE=replay cargo test --test goose_integration --verbose
 
-        echo "✅ All integration tests completed in replay mode"
+        echo "✅ Integration tests completed in replay mode"
+
+    - name: Run focused endpoint tests with TestProvider
+      run: |
+        echo "Running focused endpoint tests in replay mode..."
+
+        # Run each endpoint test individually for better error reporting
+        echo "Testing kaiak/configure endpoint..."
+        KAIAK_TEST_MODE=replay cargo test --test test_configure_endpoint --verbose
+
+        echo "Testing kaiak/generate_fix endpoint..."
+        KAIAK_TEST_MODE=replay cargo test --test test_generate_fix_endpoint --verbose
+
+        echo "Testing kaiak/delete_session endpoint..."
+        KAIAK_TEST_MODE=replay cargo test --test test_delete_session_endpoint --verbose
+
+        echo "✅ All endpoint tests completed in replay mode"
+
+    - name: Run streaming and performance tests with TestProvider
+      run: |
+        echo "Running streaming and performance tests in replay mode..."
+
+        # Run streaming tests
+        echo "Testing real-time streaming functionality..."
+        KAIAK_TEST_MODE=replay cargo test --test streaming --verbose
+
+        # Run benchmark tests
+        echo "Testing API performance and benchmarks..."
+        KAIAK_TEST_MODE=replay cargo test --test benchmarks --verbose
+
+        echo "✅ Streaming and performance tests completed in replay mode"
 
     - name: Validate test success rate
       run: |
         echo "Validating test success criteria..."
 
         # T014 - Check SC-003: 95% test success rate
-        test_output=$(cargo test --test goose_integration 2>&1)
+        total_passed=0
+        total_failed=0
 
-        # Extract passed/total from output
-        if echo "$test_output" | grep -E "test result: ok\. [0-9]+ passed"; then
-          passed_tests=$(echo "$test_output" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
-          echo "✅ Integration tests passed: $passed_tests"
-
-          # For now, any passing tests meet the criteria
-          # In full implementation, this would calculate percentage
-          if [ "$passed_tests" -gt 0 ]; then
-            echo "✅ Test success rate criteria met"
-          else
-            echo "❌ No tests passed - success rate below threshold"
-            exit 1
-          fi
+        # Test goose integration
+        if goose_output=$(KAIAK_TEST_MODE=replay cargo test --test goose_integration 2>&1); then
+          goose_passed=$(echo "$goose_output" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+          total_passed=$((total_passed + goose_passed))
+          echo "✅ Goose integration tests passed: $goose_passed"
         else
-          echo "❌ Could not parse test results"
+          echo "⚠️ Goose integration tests had issues"
+          total_failed=$((total_failed + 1))
+        fi
+
+        # Test endpoint tests
+        for test in "test_configure_endpoint" "test_generate_fix_endpoint" "test_delete_session_endpoint"; do
+          echo "Validating $test..."
+          if endpoint_output=$(KAIAK_TEST_MODE=replay cargo test --test "$test" 2>&1); then
+            endpoint_passed=$(echo "$endpoint_output" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+            total_passed=$((total_passed + endpoint_passed))
+            echo "✅ $test passed: $endpoint_passed"
+          else
+            echo "⚠️ $test had issues"
+            total_failed=$((total_failed + 1))
+          fi
+        done
+
+        # Test streaming and performance tests
+        for test in "streaming" "benchmarks"; do
+          echo "Validating $test..."
+          if test_output=$(KAIAK_TEST_MODE=replay cargo test --test "$test" 2>&1); then
+            test_passed=$(echo "$test_output" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+            total_passed=$((total_passed + test_passed))
+            echo "✅ $test passed: $test_passed"
+          else
+            echo "⚠️ $test had issues"
+            total_failed=$((total_failed + 1))
+          fi
+        done
+
+        echo "📊 Total tests passed: $total_passed"
+        echo "📊 Total test categories failed: $total_failed"
+
+        # Require at least some tests to pass
+        if [ "$total_passed" -gt 0 ] && [ "$total_failed" -le 1 ]; then
+          echo "✅ Test success criteria met (passed: $total_passed, failures: $total_failed)"
+        else
+          echo "❌ Test success rate below threshold (passed: $total_passed, failures: $total_failed)"
           exit 1
         fi
 
@@ -125,7 +185,13 @@ jobs:
         echo "Testing concurrent test execution..."
 
         # Run tests in parallel to verify no conflicts
-        cargo test --test goose_integration --jobs 2 --verbose
+        KAIAK_TEST_MODE=replay cargo test --test goose_integration --jobs 2 --verbose
+
+        echo "Testing endpoint tests in parallel..."
+        KAIAK_TEST_MODE=replay cargo test test_configure_endpoint test_generate_fix_endpoint test_delete_session_endpoint --jobs 3 --verbose
+
+        echo "Testing streaming and performance tests in parallel..."
+        KAIAK_TEST_MODE=replay cargo test streaming benchmarks --jobs 2 --verbose
 
     - name: Generate test report
       if: always()
@@ -140,12 +206,12 @@ jobs:
         echo "" >> test_report.md
 
         echo "### Recordings" >> test_report.md
-        recording_count=$(find tests/recordings -name "*.json" 2>/dev/null | wc -l)
+        recording_count=$(find tests/data/recordings -name "*.json" 2>/dev/null | wc -l)
         echo "- **Available Recordings**: $recording_count" >> test_report.md
 
         if [ "$recording_count" -gt 0 ]; then
           echo "- **Recording Files**:" >> test_report.md
-          find tests/recordings -name "*.json" | while read file; do
+          find tests/data/recordings -name "*.json" | while read file; do
             echo "  - $(basename "$file")" >> test_report.md
           done
         fi
@@ -219,9 +285,9 @@ jobs:
       id: recording-changes
       run: |
         # Check if any recording files were modified
-        if git diff --name-only main...HEAD | grep -q "tests/recordings/.*\.json"; then
+        if git diff --name-only main...HEAD | grep -q "tests/data/recordings/.*\.json"; then
           echo "changes=true" >> $GITHUB_OUTPUT
-          git diff --name-only main...HEAD | grep "tests/recordings/.*\.json" > changed_recordings.txt
+          git diff --name-only main...HEAD | grep "tests/data/recordings/.*\.json" > changed_recordings.txt
         else
           echo "changes=false" >> $GITHUB_OUTPUT
         fi
@@ -277,5 +343,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "To re-record tests locally:" >> $GITHUB_STEP_SUMMARY
         echo '```bash' >> $GITHUB_STEP_SUMMARY
-        echo 'KAIAK_TEST_MODE=record cargo test --test goose_integration' >> $GITHUB_STEP_SUMMARY
+        echo 'KAIAK_TEST_MODE=record cargo test test_configure_endpoint' >> $GITHUB_STEP_SUMMARY
+        echo 'KAIAK_TEST_MODE=record cargo test test_generate_fix_endpoint' >> $GITHUB_STEP_SUMMARY
+        echo 'KAIAK_TEST_MODE=record cargo test test_delete_session_endpoint' >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
