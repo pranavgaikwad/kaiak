@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use kaiak::config::{init_logging, settings::Settings};
+use kaiak::config::{init_logging, settings::ServerSettings};
 use kaiak::server::{start_server, TransportConfig};
 use tracing::{error, info};
 
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
 
 async fn serve_command(transport_type: String, socket_path: Option<String>) -> Result<()> {
     info!("Loading configuration...");
-    let settings = Settings::load()?;
+    let settings = ServerSettings::load()?;
     settings.validate()?;
 
     let transport_config = match transport_type.as_str() {
@@ -118,7 +118,7 @@ async fn serve_command(transport_type: String, socket_path: Option<String>) -> R
 }
 
 async fn init_command(force: bool) -> Result<()> {
-    let config_path = Settings::config_path();
+    let config_path = ServerSettings::config_path();
 
     if config_path.exists() && !force {
         anyhow::bail!(
@@ -132,7 +132,7 @@ async fn init_command(force: bool) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let settings = Settings::default();
+    let settings = ServerSettings::default();
     let toml_content = toml::to_string_pretty(&settings)?;
     std::fs::write(&config_path, toml_content)?;
 
@@ -142,13 +142,13 @@ async fn init_command(force: bool) -> Result<()> {
 
 async fn config_command(show: bool, validate: bool, edit: bool) -> Result<()> {
     if show {
-        let settings = Settings::load()?;
+        let settings = ServerSettings::load()?;
         let toml_content = toml::to_string_pretty(&settings)?;
         println!("{}", toml_content);
     }
 
     if validate {
-        match Settings::load() {
+        match ServerSettings::load() {
             Ok(settings) => match settings.validate() {
                 Ok(()) => info!("Configuration is valid"),
                 Err(e) => error!("Configuration validation failed: {}", e),
@@ -158,7 +158,7 @@ async fn config_command(show: bool, validate: bool, edit: bool) -> Result<()> {
     }
 
     if edit {
-        let config_path = Settings::config_path();
+        let config_path = ServerSettings::config_path();
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
         std::process::Command::new(editor).arg(&config_path).status()?;
     }
@@ -171,7 +171,7 @@ async fn doctor_command() -> Result<()> {
 
     // Check configuration
     print!("Configuration: ");
-    match Settings::load() {
+    match ServerSettings::load() {
         Ok(settings) => match settings.validate() {
             Ok(()) => println!("✓ Valid"),
             Err(e) => println!("✗ Invalid - {}", e),

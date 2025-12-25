@@ -2,11 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use anyhow::Result;
 
+/// Server-wide configuration loaded from config.toml or environment variables
+/// This controls the Kaiak server itself (NOT individual agent sessions)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Settings {
+pub struct ServerSettings {
     pub server: ServerConfig,
-    pub ai: AiConfig,
-    pub workspace: WorkspaceConfig,
+    pub ai: AiDefaultsConfig,
+    pub workspace: DefaultWorkspaceConfig,
     pub security: SecurityConfig,
     pub performance: PerformanceConfig,
 }
@@ -20,13 +22,15 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiConfig {
+pub struct AiDefaultsConfig {
     pub timeout: u32,
     pub max_turns: u32,
 }
 
+/// Global workspace defaults applied to all sessions
+/// (Not to be confused with models::configuration::WorkspaceConfig which is per-session)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceConfig {
+pub struct DefaultWorkspaceConfig {
     pub exclude_patterns: Vec<String>,
     pub max_file_size: u64,
 }
@@ -43,7 +47,7 @@ pub struct PerformanceConfig {
     pub session_cache_size: u32,
 }
 
-impl Default for Settings {
+impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             server: ServerConfig {
@@ -52,11 +56,11 @@ impl Default for Settings {
                 log_level: "info".to_string(),
                 max_concurrent_sessions: 10,
             },
-            ai: AiConfig {
+            ai: AiDefaultsConfig {
                 timeout: 300,
                 max_turns: 50,
             },
-            workspace: WorkspaceConfig {
+            workspace: DefaultWorkspaceConfig {
                 exclude_patterns: vec![
                     "target/".to_string(),
                     "node_modules/".to_string(),
@@ -77,7 +81,7 @@ impl Default for Settings {
     }
 }
 
-impl Settings {
+impl ServerSettings {
     pub fn load() -> Result<Self> {
         let mut settings = Self::default();
 

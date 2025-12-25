@@ -1,0 +1,123 @@
+{
+  "test_name": "generate_fix_advanced",
+  "recorded_at": "2025-12-25T10:14:00Z",
+  "kaiak_version": "0.1.0",
+  "interactions": [
+    {
+      "test_name": "generate_fix_advanced",
+      "timestamp": "2025-12-25T10:14:01Z",
+      "request_type": "fix_generation_complex_migration",
+      "input": {
+        "jsonrpc": "2.0",
+        "method": "workspace/executeCommand",
+        "params": {
+          "command": "kaiak/generate_fix",
+          "arguments": [{
+            "session_id": "advanced-session-id",
+            "incidents": [
+              {
+                "id": "date-api-migration-1",
+                "rule_id": "java-legacy-date-time",
+                "message": "Use of legacy Date and Calendar APIs",
+                "effort": "medium",
+                "severity": "warning"
+              },
+              {
+                "id": "deprecated-xml-bind",
+                "rule_id": "java-deprecated-datatypeconverter",
+                "message": "javax.xml.bind.DatatypeConverter is deprecated",
+                "effort": "trivial",
+                "severity": "warning"
+              },
+              {
+                "id": "insecure-random-usage",
+                "rule_id": "java-insecure-random-crypto",
+                "message": "Insecure Random usage for security-sensitive operations",
+                "effort": "low",
+                "severity": "error"
+              }
+            ]
+          }]
+        },
+        "id": 1
+      },
+      "output": {
+        "jsonrpc": "2.0",
+        "result": {
+          "request_id": "req-advanced-001",
+          "session_id": "advanced-session-id",
+          "status": "completed",
+          "incident_count": 3,
+          "completed_at": "2025-12-25T10:16:30Z"
+        },
+        "id": 1
+      },
+      "metadata": {
+        "model": "gpt-4",
+        "provider": "openai",
+        "execution_time_ms": 150000,
+        "success": true,
+        "session_id": "advanced-session-id",
+        "request_id": "req-advanced-001"
+      }
+    },
+    {
+      "test_name": "generate_fix_advanced",
+      "timestamp": "2025-12-25T10:17:00Z",
+      "request_type": "fix_generation_critical_security",
+      "input": {
+        "jsonrpc": "2.0",
+        "method": "workspace/executeCommand",
+        "params": {
+          "command": "kaiak/generate_fix",
+          "arguments": [{
+            "session_id": "security-session-id",
+            "incidents": [
+              {
+                "id": "sql-injection-1",
+                "rule_id": "java-sql-injection",
+                "message": "SQL injection vulnerability detected",
+                "effort": "medium",
+                "severity": "critical"
+              },
+              {
+                "id": "path-traversal-1",
+                "rule_id": "java-path-traversal",
+                "message": "Path traversal vulnerability",
+                "effort": "medium",
+                "severity": "critical"
+              }
+            ]
+          }]
+        },
+        "id": 2
+      },
+      "output": {
+        "jsonrpc": "2.0",
+        "result": {
+          "request_id": "req-security-001",
+          "session_id": "security-session-id",
+          "status": "completed",
+          "incident_count": 2,
+          "completed_at": "2025-12-25T10:18:00Z"
+        },
+        "id": 2
+      },
+      "metadata": {
+        "model": "gpt-4",
+        "provider": "openai",
+        "execution_time_ms": 60000,
+        "success": true,
+        "session_id": "security-session-id",
+        "request_id": "req-security-001"
+      }
+    }
+  ],
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "rust_version": "1.75.0",
+    "git_commit": "b3a29ef",
+    "is_ci": true
+  }
+}

@@ -7,53 +7,38 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{error, info, debug};
 
-use crate::handlers::{FixGenerationHandler, LifecycleHandler};
-use crate::models::{FixGenerationRequest, Incident};
+use crate::handlers::{ConfigureHandler, GenerateFixHandler, DeleteSessionHandler};
 use crate::server::jsonrpc::{
     methods, error_codes, create_error,
-    CreateSessionRequest, CreateSessionResponse,
-    TerminateSessionRequest, TerminateSessionResponse,
+    ConfigureRequest, ConfigureResponse,
     GenerateFixRequest, GenerateFixResponse,
+    DeleteSessionRequest, DeleteSessionResponse,
     StreamNotification,
-    session_not_found_error,
 };
 
 /// Main Kaiak LSP server that handles JSON-RPC requests
 pub struct KaiakServer {
     client: Client,
-    fix_handler: Arc<RwLock<Option<FixGenerationHandler>>>,
-    lifecycle_handler: Arc<RwLock<Option<LifecycleHandler>>>,
+    configure_handler: Arc<RwLock<Option<ConfigureHandler>>>,
+    generate_fix_handler: Arc<RwLock<Option<GenerateFixHandler>>>,
+    delete_session_handler: Arc<RwLock<Option<DeleteSessionHandler>>>,
 }
 
 impl KaiakServer {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            fix_handler: Arc::new(RwLock::new(None)),
-            lifecycle_handler: Arc::new(RwLock::new(None)),
+            configure_handler: Arc::new(RwLock::new(None)),
+            generate_fix_handler: Arc::new(RwLock::new(None)),
+            delete_session_handler: Arc::new(RwLock::new(None)),
         }
     }
 
     /// Initialize handlers after server creation
     async fn ensure_handlers_initialized(&self) -> Result<()> {
-        // Initialize fix generation handler
-        {
-            let mut fix_handler = self.fix_handler.write().await;
-            if fix_handler.is_none() {
-                *fix_handler = Some(FixGenerationHandler::new().await?);
-                debug!("Fix generation handler initialized");
-            }
-        }
-
-        // Initialize lifecycle handler
-        {
-            let mut lifecycle_handler = self.lifecycle_handler.write().await;
-            if lifecycle_handler.is_none() {
-                *lifecycle_handler = Some(LifecycleHandler::new().await?);
-                debug!("Lifecycle handler initialized");
-            }
-        }
-
+        // Placeholder implementation - actual handlers will be created in user story phases
+        // For now, we just mark them as "initialized" to satisfy the routing requirements
+        debug!("Handler initialization placeholder - actual implementation in user story phases");
         Ok(())
     }
 
@@ -69,88 +54,50 @@ impl KaiakServer {
         self.client.send_notification::<tower_lsp::lsp_types::notification::ShowMessage>(params).await;
     }
 
-    /// Handle create session request
-    async fn handle_create_session(&self, params: CreateSessionRequest) -> JsonRpcResult<CreateSessionResponse> {
+    /// Handle configure request
+    async fn handle_configure(&self, _params: ConfigureRequest) -> JsonRpcResult<ConfigureResponse> {
         if let Err(e) = self.ensure_handlers_initialized().await {
             error!("Failed to initialize handlers: {}", e);
             return Err(create_error(
-                error_codes::SESSION_CREATION_FAILED,
+                error_codes::CONFIGURATION_ERROR,
                 "Handler initialization failed",
                 None,
             ));
         }
 
-        let lifecycle_handler = self.lifecycle_handler.read().await;
-        let handler = lifecycle_handler.as_ref().unwrap();
+        // Placeholder implementation - actual handler will be implemented in User Story 1
+        info!("Configure request received (placeholder implementation)");
 
-        // Create session object for new interface
-        let session = crate::models::session::Session {
-            id: crate::models::Id::new(),
-            goose_session_id: uuid::Uuid::new_v4().to_string(),
-            status: crate::models::session::SessionStatus::Created,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            configuration: crate::models::session::SessionConfiguration {
-                workspace_path: params.workspace_path.clone(),
-                session_name: params.session_name.clone(),
-                provider_config: params.configuration.clone(),
-                timeout: None,
-                max_turns: None,
-                custom: Default::default(),
-            },
-            active_request_id: None,
-            message_count: 0,
-            error_count: 0,
-        };
-
-        let session_id = session.id.clone();
-        match handler.create_session(session).await {
-            Ok(()) => {
-                info!("Session created: {}", session_id);
-                Ok(CreateSessionResponse {
-                    session_id: session_id,
-                    status: "ready".to_string(),
-                    created_at: chrono::Utc::now().to_rfc3339(),
-                })
-            }
-            Err(e) => {
-                error!("Failed to create session for workspace {}: {}", params.workspace_path, e);
-                Err(create_error(
-                    error_codes::SESSION_CREATION_FAILED,
-                    &format!("Session creation failed: {}", e),
-                    None,
-                ))
-            }
-        }
+        Err(create_error(
+            error_codes::CONFIGURATION_ERROR,
+            "Configure handler not yet implemented - will be created in User Story 1",
+            None,
+        ))
     }
 
-    /// Handle terminate session request
-    async fn handle_terminate_session(&self, params: TerminateSessionRequest) -> JsonRpcResult<TerminateSessionResponse> {
-        let lifecycle_handler = self.lifecycle_handler.read().await;
-        let handler = match lifecycle_handler.as_ref() {
-            Some(h) => h,
-            None => return Err(session_not_found_error(&params.session_id)),
-        };
-
-        match handler.terminate_session(&params.session_id).await {
-            Ok(()) => {
-                info!("Session terminated: {}", params.session_id);
-                Ok(TerminateSessionResponse {
-                    session_id: params.session_id,
-                    status: "terminated".to_string(),
-                    message_count: 0, // TODO: Track actual message count
-                    terminated_at: chrono::Utc::now().to_rfc3339(),
-                })
-            }
-            Err(e) => {
-                error!("Failed to terminate session {}: {}", params.session_id, e);
-                Err(session_not_found_error(&params.session_id))
-            }
+    /// Handle delete session request
+    async fn handle_delete_session(&self, _params: DeleteSessionRequest) -> JsonRpcResult<DeleteSessionResponse> {
+        if let Err(e) = self.ensure_handlers_initialized().await {
+            error!("Failed to initialize handlers: {}", e);
+            return Err(create_error(
+                error_codes::SESSION_NOT_FOUND,
+                "Handler initialization failed",
+                None,
+            ));
         }
+
+        // Placeholder implementation - actual handler will be implemented in User Story 2
+        info!("Delete session request received (placeholder implementation)");
+
+        Err(create_error(
+            error_codes::SESSION_NOT_FOUND,
+            "Delete session handler not yet implemented - will be created in User Story 2",
+            None,
+        ))
     }
 
     /// Handle fix generation request with streaming
-    async fn handle_generate_fix(&self, params: GenerateFixRequest) -> JsonRpcResult<GenerateFixResponse> {
+    async fn handle_generate_fix(&self, _params: GenerateFixRequest) -> JsonRpcResult<GenerateFixResponse> {
         if let Err(e) = self.ensure_handlers_initialized().await {
             error!("Failed to initialize handlers: {}", e);
             return Err(create_error(
@@ -160,81 +107,14 @@ impl KaiakServer {
             ));
         }
 
-        let fix_handler = self.fix_handler.read().await;
-        let handler = fix_handler.as_ref().unwrap();
+        // Placeholder implementation - actual handler will be implemented in User Story 3
+        info!("Generate fix request received (placeholder implementation)");
 
-        // Convert JSON incidents to Incident structs
-        let incidents: Result<Vec<Incident>, _> = params.incidents.iter()
-            .map(|inc| serde_json::from_value(inc.clone()))
-            .collect();
-
-        let incidents = match incidents {
-            Ok(incidents) => incidents,
-            Err(e) => {
-                error!("Failed to parse incidents: {}", e);
-                return Err(create_error(
-                    error_codes::RESPONSE_VALIDATION_FAILED,
-                    &format!("Invalid incident format: {}", e),
-                    None,
-                ));
-            }
-        };
-
-        // Capture incident count before move
-        let incident_count = incidents.len();
-
-        // Create fix generation request
-        let fix_request = FixGenerationRequest::new(
-            params.session_id.clone(),
-            incidents,
-            "unknown".to_string(), // TODO: Extract from migration_context
-        );
-
-        match handler.handle_request(&fix_request).await {
-            Ok((request_id, mut receiver)) => {
-                // Spawn a task to handle streaming messages
-                let client = self.client.clone();
-                let session_id = params.session_id.clone();
-                let request_id_clone = request_id.clone();
-
-                tokio::spawn(async move {
-                    while let Some(message) = receiver.recv().await {
-                        let notification = StreamNotification {
-                            session_id: session_id.clone(),
-                            request_id: Some(request_id_clone.clone()),
-                            message_id: uuid::Uuid::new_v4().to_string(),
-                            timestamp: chrono::Utc::now().to_rfc3339(),
-                            content: serde_json::to_value(&message).unwrap_or(Value::Null),
-                        };
-
-                        // Send as a standard LSP notification for now
-                        let params = tower_lsp::lsp_types::ShowMessageParams {
-                            typ: tower_lsp::lsp_types::MessageType::INFO,
-                            message: format!("Stream: {}", serde_json::to_string(&notification).unwrap_or_else(|_| "notification".to_string())),
-                        };
-
-                        client.send_notification::<tower_lsp::lsp_types::notification::ShowMessage>(params).await;
-                    }
-                });
-
-                info!("Fix generation request started: {}", request_id);
-                Ok(GenerateFixResponse {
-                    request_id,
-                    session_id: params.session_id,
-                    status: "processing".to_string(),
-                    incident_count,
-                    created_at: chrono::Utc::now().to_rfc3339(),
-                })
-            }
-            Err(e) => {
-                error!("Failed to process fix generation request: {}", e);
-                Err(create_error(
-                    error_codes::AGENT_INITIALIZATION_FAILED,
-                    &format!("Fix generation failed: {}", e),
-                    None,
-                ))
-            }
-        }
+        Err(create_error(
+            error_codes::AGENT_INITIALIZATION_FAILED,
+            "Generate fix handler not yet implemented - will be created in User Story 3",
+            None,
+        ))
     }
 }
 
@@ -286,13 +166,13 @@ impl LanguageServer for KaiakServer {
         // Not used for our use case
     }
 
-    // Custom request handlers would be implemented via execute_command or custom requests
+    // Custom request handlers for the three-endpoint API
     async fn execute_command(&self, params: ExecuteCommandParams) -> JsonRpcResult<Option<Value>> {
         match params.command.as_str() {
-            methods::SESSION_CREATE => {
+            methods::CONFIGURE => {
                 if let Some(arg) = params.arguments.get(0) {
-                    match serde_json::from_value::<CreateSessionRequest>(arg.clone()) {
-                        Ok(req) => self.handle_create_session(req).await.map(|resp| {
+                    match serde_json::from_value::<ConfigureRequest>(arg.clone()) {
+                        Ok(req) => self.handle_configure(req).await.map(|resp| {
                             Some(serde_json::to_value(resp).unwrap_or(Value::Null))
                         }),
                         Err(e) => Err(create_error(
@@ -309,27 +189,7 @@ impl LanguageServer for KaiakServer {
                     ))
                 }
             }
-            methods::SESSION_TERMINATE => {
-                if let Some(arg) = params.arguments.get(0) {
-                    match serde_json::from_value::<TerminateSessionRequest>(arg.clone()) {
-                        Ok(req) => self.handle_terminate_session(req).await.map(|resp| {
-                            Some(serde_json::to_value(resp).unwrap_or(Value::Null))
-                        }),
-                        Err(e) => Err(create_error(
-                            error_codes::RESPONSE_VALIDATION_FAILED,
-                            &format!("Invalid request format: {}", e),
-                            None,
-                        )),
-                    }
-                } else {
-                    Err(create_error(
-                        error_codes::RESPONSE_VALIDATION_FAILED,
-                        "Missing request parameters",
-                        None,
-                    ))
-                }
-            }
-            methods::FIX_GENERATE => {
+            methods::GENERATE_FIX => {
                 if let Some(arg) = params.arguments.get(0) {
                     match serde_json::from_value::<GenerateFixRequest>(arg.clone()) {
                         Ok(req) => self.handle_generate_fix(req).await.map(|resp| {
@@ -349,10 +209,33 @@ impl LanguageServer for KaiakServer {
                     ))
                 }
             }
+            methods::DELETE_SESSION => {
+                if let Some(arg) = params.arguments.get(0) {
+                    match serde_json::from_value::<DeleteSessionRequest>(arg.clone()) {
+                        Ok(req) => self.handle_delete_session(req).await.map(|resp| {
+                            Some(serde_json::to_value(resp).unwrap_or(Value::Null))
+                        }),
+                        Err(e) => Err(create_error(
+                            error_codes::RESPONSE_VALIDATION_FAILED,
+                            &format!("Invalid request format: {}", e),
+                            None,
+                        )),
+                    }
+                } else {
+                    Err(create_error(
+                        error_codes::RESPONSE_VALIDATION_FAILED,
+                        "Missing request parameters",
+                        None,
+                    ))
+                }
+            }
             _ => Err(Error {
-                code: tower_lsp::jsonrpc::ErrorCode::MethodNotFound,
-                message: format!("Unknown command: {}", params.command).into(),
-                data: None,
+                code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32601),
+                message: format!("Method not found: {} - only kaiak/configure, kaiak/generate_fix, and kaiak/delete_session are supported", params.command).into(),
+                data: Some(serde_json::json!({
+                    "supported_methods": ["kaiak/configure", "kaiak/generate_fix", "kaiak/delete_session"],
+                    "requested_method": params.command
+                })),
             }),
         }
     }
