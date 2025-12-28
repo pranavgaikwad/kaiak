@@ -32,9 +32,6 @@ impl ConfigurationValidator {
         // Validate server configuration
         self.validate_server_config(&settings.server);
 
-        // Validate AI configuration
-        self.validate_ai_config(&settings.ai);
-
         // Validate workspace configuration
         self.validate_workspace_config(&settings.workspace);
 
@@ -100,32 +97,15 @@ impl ConfigurationValidator {
         }
 
         // Validate concurrent sessions limit
-        if server_config.max_concurrent_sessions == 0 {
+        if server_config.max_concurrent_sessions <= 0 {
             self.errors.push("max_concurrent_sessions must be greater than 0".to_string());
-        } else if server_config.max_concurrent_sessions > 100 {
+        } else if server_config.max_concurrent_sessions >= 100 {
             self.warnings.push(format!(
                 "max_concurrent_sessions is very high ({}). This may impact performance",
                 server_config.max_concurrent_sessions
             ));
         }
     }
-
-    fn validate_ai_config(&mut self, ai_config: &crate::config::settings::AiDefaultsConfig) {
-        // Validate timeout
-        if ai_config.timeout < 30 {
-            self.warnings.push("AI timeout is very short (< 30s). May cause premature failures".to_string());
-        } else if ai_config.timeout > 600 {
-            self.warnings.push("AI timeout is very long (> 10m). Consider reducing for better UX".to_string());
-        }
-
-        // Validate max_turns
-        if ai_config.max_turns < 5 {
-            self.warnings.push("max_turns is very low (< 5). May limit complex interactions".to_string());
-        } else if ai_config.max_turns > 100 {
-            self.warnings.push("max_turns is very high (> 100). May cause excessive API usage".to_string());
-        }
-    }
-
 
     fn validate_workspace_config(&mut self, workspace_config: &crate::config::settings::DefaultWorkspaceConfig) {
         // Validate exclude patterns

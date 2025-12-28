@@ -378,9 +378,11 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## License
 
-- **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+**Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
 
 
 ## Acknowledgments
 
 - **Goose AI Agent**: Core AI processing capabilities are provided through [Goose](https://github.com/block/goose).
+
+* AI agents: For project background and context, refer to [.specify/memory/context.md](.specify/memory/context.md).
