@@ -205,7 +205,7 @@ impl ConfigurationHierarchy {
 }
 ```
 
-### 6. ProcedureRequest (ENHANCED)
+### 6. ClientRequest (ENHANCED)
 
 Enhanced request wrapper for client-side JSON-RPC calls.
 
@@ -213,7 +213,7 @@ Enhanced request wrapper for client-side JSON-RPC calls.
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProcedureRequest {
+pub struct ClientRequest {
     /// JSON-RPC method name
     pub method: String,
 
@@ -279,7 +279,7 @@ graph TD
     H --> J[GooseSessionConfig]
     H --> G
 
-    K[ProcedureRequest] --> L[ConfigureRequest]
+    K[ClientRequest] --> L[ConfigureRequest]
     K --> M[GenerateFixRequest]
     K --> N[DeleteSessionRequest]
 

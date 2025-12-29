@@ -5,7 +5,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::agents::GooseAgentManager;
+use crate::agent::GooseAgentManager;
 use crate::KaiakResult;
 
 /// Request type for kaiak/delete_session endpoint

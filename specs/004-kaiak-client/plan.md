@@ -75,7 +75,11 @@ specs/[###-feature]/
 ```text
 src/
 ├── models/
-│   ├── configuration.rs      # Unified configuration structures (ServerConfig, InitConfig, BaseConfig, AgentConfig)
+│   ├── configuration.rs      # Unified configuration structures (see data-model.md):
+│   │                        #   - ServerConfig: Complete server startup config
+│   │                        #   - InitConfig: Server initialization subset
+│   │                        #   - BaseConfig: Runtime server config subset
+│   │                        #   - AgentConfig: Session-specific agent config, the existing AgentConfiguration will be replaced with this
 │   ├── client.rs            # NEW: Client connection state and management
 │   ├── errors.rs            # Error types and JSON-RPC error codes
 │   └── mod.rs
@@ -116,7 +120,7 @@ tests/
 
 **Structure Decision**: Single project architecture maintained with enhanced CLI structure. The existing modular design is preserved while adding client-specific modules and consolidating configuration management. Key changes:
 
-- **Configuration Unification**: All config logic moved from `config/` to `models/configuration.rs` and `logging.rs`
+- **Configuration Unification**: Server startup config (ServerConfig) and runtime config (BaseConfig) unified in single module per data-model.md, while removing scattered config files. Session-specific AgentConfig remains separate for per-session customization.
 - **Client Architecture**: New client modules for connection state and procedure execution
 - **Enhanced CLI**: Restructured commands to support both server and client operations
 - **Test Coverage**: Added `test_client.rs` for comprehensive client integration tests alongside existing endpoint tests

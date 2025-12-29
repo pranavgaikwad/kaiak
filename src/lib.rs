@@ -5,14 +5,20 @@
 
 use anyhow::Result;
 
-pub mod config;
+// Re-export commonly used types
+pub use models::session::SessionManager;
+
+// pub mod config; // REMOVED: Configuration logic moved to models/configuration.rs and logging.rs
 pub mod server;
 pub mod models;
 pub mod handlers;
-pub mod agents;
+pub mod agent;
+pub mod client;
+pub mod logging;
+pub mod jsonrpc;
 
 /// Application-wide error types with context preservation
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum KaiakError {
     #[error("Configuration error: {message}")]
     Configuration { message: String },
@@ -41,16 +47,14 @@ pub enum KaiakError {
     #[error("Internal error: {0}")]
     Internal(String),
 
-    #[error("IO error: {source}")]
+    #[error("IO error: {message}")]
     Io {
-        #[from]
-        source: std::io::Error,
+        message: String,
     },
 
-    #[error("Serialization error: {source}")]
+    #[error("Serialization error: {message}")]
     Serialization {
-        #[from]
-        source: serde_json::Error,
+        message: String,
     },
 
     #[error("Session in use: {session_id}")]
@@ -221,11 +225,11 @@ impl KaiakError {
             KaiakError::Internal(message) => {
                 format!("Internal error: {}", message)
             }
-            KaiakError::Io { source } => {
-                format!("File system error: {}", source)
+            KaiakError::Io { message } => {
+                format!("File system error: {}", message)
             }
-            KaiakError::Serialization { source } => {
-                format!("Data format error: {}", source)
+            KaiakError::Serialization { message } => {
+                format!("Data format error: {}", message)
             }
             KaiakError::SessionInUse { session_id, in_use_since } => {
                 if let Some(since) = in_use_since {

@@ -6,4 +6,4 @@
 pub use goose::session::{Session, SessionManager, SessionType};
 
 // Import our session wrapper types
-pub use crate::agents::session_wrapper::{GooseSessionWrapper, SessionInfo};
+pub use crate::agent::session_wrapper::{GooseSessionWrapper, SessionInfo};

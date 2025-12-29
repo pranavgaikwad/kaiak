@@ -89,6 +89,13 @@ Developers need access to standard CLI utilities like version information, loggi
 - When socket permissions prevent connection, system fails with permission error and suggests checking file ownership and access rights
 - When JSON input contains syntax errors or invalid structure, system fails with detailed parsing errors and suggests input format corrections
 
+**Error Code Mapping**:
+- Non-existent socket path → -32004 (WORKSPACE_ERROR) + "Socket path does not exist. Verify server is running and path is correct."
+- Server shutdown during operations → -32603 (INTERNAL_ERROR) + "Connection lost. Check server status and reconnect."
+- Invalid configuration files → -32002 (CONFIGURATION_ERROR) + "Configuration file is malformed. Check syntax and required fields."
+- Socket permission issues → -32004 (WORKSPACE_ERROR) + "Permission denied accessing socket. Check file ownership and access rights."
+- JSON input syntax errors → -32602 (INVALID_PARAMS) + "JSON input contains syntax errors. Validate format and structure."
+
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
@@ -101,23 +108,23 @@ Developers need access to standard CLI utilities like version information, loggi
 - **FR-006**: System MUST support both file-based input (`--input`) and inline JSON input (`--input-json`) for all procedure commands
 - **FR-007**: System MUST provide shorthand syntax for delete_session command using session ID parameter
 - **FR-008**: System MUST expose global options (log-level, log-file, version, completion) available to all commands
-- **FR-009**: System MUST unify server configuration and procedure configuration into a coherent structure
+- **FR-009**: System MUST unify server startup configuration and runtime base configuration into a coherent hierarchy (ServerConfig encompasses InitConfig and BaseConfig), while maintaining separate AgentConfig for session-specific overrides
 - **FR-010**: System MUST provide clear error messages with retry suggestions and connection validation guidance when client operations fail due to connection or input issues
 
 ### Key Entities *(include if feature involves data)*
 
 - **ServerConfig**: Represents server startup configuration including transport type, socket paths, logging settings, and concurrency limits
 - **ClientConnection**: Represents stored connection state persisted in ~/.kaiak/client.state including socket path and connection validation status
-- **ProcedureRequest**: Represents structured input for remote procedure calls including procedure type and parameters
+- **ClientRequest**: Represents structured input for remote procedure calls including procedure type and parameters
 - **ConfigurationHierarchy**: Represents merged configuration from multiple sources with proper precedence handling
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: Developers can start a server and connect a client in under 30 seconds with default configuration
-- **SC-002**: System supports configuration changes without requiring server restart for settings not associated with a session or from init
-- **SC-003**: Client commands complete successfully within 2 seconds for configuration operations and connection management
+- **SC-001**: Developers can start a server and connect a client in under 30 seconds with default configuration (cold start from system boot, including socket creation and first connection establishment)
+- **SC-002**: System supports configuration changes without requiring server restart through a configure remote procedure
+- **SC-003**: Client commands invoke the appropriate remote procedures on the server, resulting in success or failure as determined by the server.
 - **SC-004**: 100% of existing server procedures are accessible through client commands with equivalent functionality
 - **SC-005**: Command-line interface follows standard conventions and passes usability testing with 95% task completion rate
 

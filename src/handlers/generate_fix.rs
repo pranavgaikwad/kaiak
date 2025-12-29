@@ -5,8 +5,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::models::incidents::MigrationIncident;
-use crate::agents::GooseAgentManager;
+use crate::models::{configuration::AgentConfig, incidents::MigrationIncident};
+use crate::agent::GooseAgentManager;
 use crate::KaiakResult;
 
 /// Request type for kaiak/generate_fix endpoint
@@ -22,39 +22,15 @@ pub struct GenerateFixRequest {
     pub incidents: Vec<MigrationIncident>,
     /// Optional context for the migration process
     pub migration_context: Option<serde_json::Value>,
+    pub agent_config: AgentConfig,
 }
 
 /// Response type for kaiak/generate_fix endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateFixResponse {
-    /// Unique request identifier for tracking
     pub request_id: String,
-    /// Session identifier
     pub session_id: String,
-    /// Processing status
-    pub status: GenerateFixStatus,
-    /// Number of incidents being processed
-    pub incident_count: usize,
-    /// Request creation timestamp
     pub created_at: String,
-    /// Estimated completion time if available
-    pub estimated_completion: Option<String>,
-}
-
-/// Status of fix generation request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GenerateFixStatus {
-    /// Request accepted and queued for processing
-    Accepted,
-    /// Processing in progress
-    Processing,
-    /// Processing completed successfully
-    Completed,
-    /// Processing failed with errors
-    Failed,
-    /// Request was rejected due to validation errors
-    Rejected,
 }
 
 /// Handler for kaiak/generate_fix endpoint
@@ -64,13 +40,16 @@ pub struct GenerateFixHandler {
     agent_manager: Arc<GooseAgentManager>,
     /// Active requests tracking
     active_requests: Arc<RwLock<std::collections::HashMap<String, GenerateFixRequest>>>,
+    /// Base configuration of the server
+    base_config: Arc<crate::models::configuration::BaseConfig>,
 }
 
 impl GenerateFixHandler {
-    pub fn new(agent_manager: Arc<GooseAgentManager>) -> Self {
+    pub fn new(agent_manager: Arc<GooseAgentManager>, base_config: Arc<crate::models::configuration::BaseConfig>) -> Self {
         Self {
             agent_manager,
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            base_config,
         }
     }
 
@@ -97,34 +76,21 @@ impl GenerateFixHandler {
             ));
         }
 
-        // Additional custom validation
-        self.validate_request(&request).await?;
-
-        // Generate unique request ID
         let request_id = Uuid::new_v4().to_string();
-
-        // Store request for tracking
         {
             let mut active = self.active_requests.write().await;
             active.insert(request_id.clone(), request.clone());
         }
 
-        // Count incidents
-        let incident_count = request.incidents.len();
-        info!("Processing {} migration incidents", incident_count);
+        info!("Processing {} migration incidents", request.incidents.len());
 
-        // For User Story 1, we implement the API surface but defer actual agent execution to User Story 3
-        // This creates a proper response structure and validates inputs
         match self.initiate_agent_processing(&request_id, &request).await {
             Ok(_) => {
                 info!("Generate fix request {} initiated successfully", request_id);
                 Ok(GenerateFixResponse {
                     request_id,
                     session_id: request.session_id,
-                    status: GenerateFixStatus::Accepted,
-                    incident_count,
                     created_at: chrono::Utc::now().to_rfc3339(),
-                    estimated_completion: self.estimate_completion_time(incident_count),
                 })
             }
             Err(e) => {
@@ -139,10 +105,7 @@ impl GenerateFixHandler {
                 Ok(GenerateFixResponse {
                     request_id,
                     session_id: request.session_id,
-                    status: GenerateFixStatus::Failed,
-                    incident_count,
                     created_at: chrono::Utc::now().to_rfc3339(),
-                    estimated_completion: None,
                 })
             }
         }
@@ -154,49 +117,10 @@ impl GenerateFixHandler {
         active.len()
     }
 
-    /// Validate generate fix request
-    async fn validate_request(&self, request: &GenerateFixRequest) -> KaiakResult<()> {
-        // Validate session ID format
-        if request.session_id.is_empty() {
-            return Err(crate::KaiakError::session("Session ID cannot be empty".to_string(), Some(request.session_id.clone())));
-        }
-
-        // Validate UUID format for session ID
-        if Uuid::parse_str(&request.session_id).is_err() {
-            return Err(crate::KaiakError::session("Session ID must be a valid UUID".to_string(), Some(request.session_id.clone())));
-        }
-
-        // Validate incidents array
-        if request.incidents.is_empty() {
-            return Err(crate::KaiakError::agent("At least one incident must be provided".to_string(), None));
-        }
-
-        // Validate individual incidents
-        for (i, incident) in request.incidents.iter().enumerate() {
-            if incident.id.is_empty() {
-                return Err(crate::KaiakError::agent(format!("Incident {} has empty ID", i), None));
-            }
-            if incident.rule_id.is_empty() {
-                return Err(crate::KaiakError::agent(format!("Incident {} has empty rule_id", i), None));
-            }
-        }
-
-        // Check for reasonable incident count (prevent overload)
-        if request.incidents.len() > 1000 {
-            return Err(crate::KaiakError::ResourceExhausted("Too many incidents in single request (max: 1000)".to_string()));
-        }
-
-        Ok(())
-    }
-
     /// Initiate agent processing with Goose session management
-    /// User Story 2: Session creation/lookup integration
-    /// User Story 3: Full agent execution (upcoming)
     async fn initiate_agent_processing(&self, request_id: &str, request: &GenerateFixRequest) -> KaiakResult<()> {
         debug!("Initiating agent processing for request: {}", request_id);
 
-        // User Story 2: Use Goose SessionManager for session management
-        // Try to lock the session to prevent concurrent access
         match self.agent_manager.lock_session(&request.session_id).await {
             Ok(_) => {
                 debug!("Successfully locked session: {}", request.session_id);
@@ -207,15 +131,12 @@ impl GenerateFixHandler {
             }
         }
 
-        // Create a default configuration for session creation if needed
-        let config = crate::models::configuration::AgentConfiguration::default();
-
         // Get or create session using Goose SessionManager
-        let session_info = match self.agent_manager.get_or_create_session(&request.session_id, &config).await {
+        let session_info = match self.agent_manager.get_or_create_session(&request.session_id, &request.agent_config).await {
             Ok(session_info) => {
                 debug!("Session ready for processing: {} (workspace: {:?})",
                        request.session_id,
-                       session_info.configuration.workspace.working_dir);
+                       request.agent_config.workspace);
                 session_info
             }
             Err(e) => {
@@ -227,44 +148,14 @@ impl GenerateFixHandler {
                 return Err(e);
             }
         };
+        let agent = self.agent_manager.create_agent(&request.session_id, &request.agent_config).await?;
 
-        // Validate workspace is accessible using actual session configuration
-        let workspace_path = &session_info.configuration.workspace.working_dir;
-        if !workspace_path.exists() {
-            error!("Workspace directory does not exist: {:?}", workspace_path);
-            self.agent_manager.unlock_session(&request.session_id).await.ok();
-            return Err(crate::KaiakError::workspace(
-                "Workspace directory does not exist".to_string(),
-                Some(workspace_path.to_string_lossy().to_string())
-            ));
-        }
 
-        // Log incident processing preparation
-        debug!("Prepared {} incidents for processing in workspace: {:?}",
-               request.incidents.len(), workspace_path);
-
-        // User Story 2 Achievement: Session is now managed by Goose SessionManager
-        // User Story 3: Will implement actual agent execution with streaming responses
-        info!("Request {} accepted with Goose session management", request_id);
-
-        // For User Story 2, we unlock the session as we're not actually processing yet
-        // User Story 3 will keep the lock during actual agent execution
         if let Err(unlock_err) = self.agent_manager.unlock_session(&request.session_id).await {
             warn!("Failed to unlock session after preparation: {}", unlock_err);
         }
 
         Ok(())
-    }
-
-    /// Estimate completion time based on incident count
-    fn estimate_completion_time(&self, incident_count: usize) -> Option<String> {
-        // Simple estimation: 30 seconds per incident + base time
-        let base_seconds = 60; // 1 minute base processing time
-        let per_incident_seconds = 30;
-        let total_seconds = base_seconds + (incident_count * per_incident_seconds);
-
-        let estimated_time = chrono::Utc::now() + chrono::Duration::seconds(total_seconds as i64);
-        Some(estimated_time.to_rfc3339())
     }
 
     /// Cancel a generate fix request

@@ -1,292 +1,192 @@
+//! Kaiak JSON-RPC server implementation using custom JSON-RPC 2.0
+
 use anyhow::Result;
-use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::{Error, Result as JsonRpcResult};
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{error, info, debug};
 
-use crate::handlers::{ConfigureHandler, GenerateFixHandler, DeleteSessionHandler};
-use crate::server::jsonrpc::{
-    methods, error_codes, create_error,
-    ConfigureRequest, ConfigureResponse,
-    GenerateFixRequest, GenerateFixResponse,
-    DeleteSessionRequest, DeleteSessionResponse,
-    StreamNotification,
+use crate::{
+    jsonrpc::{
+        create_kaiak_server,
+        transport::TransportConfig as JsonRpcTransportConfig,
+    },
+    models::configuration::ServerConfig,
 };
 
-/// Main Kaiak LSP server that handles JSON-RPC requests
-pub struct KaiakServer {
-    client: Client,
-    configure_handler: Arc<RwLock<Option<ConfigureHandler>>>,
-    generate_fix_handler: Arc<RwLock<Option<GenerateFixHandler>>>,
-    delete_session_handler: Arc<RwLock<Option<DeleteSessionHandler>>>,
+/// Transport configuration for the server
+#[derive(Debug, Clone)]
+pub enum TransportConfig {
+    /// Standard input/output transport
+    Stdio,
+    /// Unix domain socket transport
+    UnixSocket { path: String },
 }
 
-impl KaiakServer {
-    pub fn new(client: Client) -> Self {
-        Self {
-            client,
-            configure_handler: Arc::new(RwLock::new(None)),
-            generate_fix_handler: Arc::new(RwLock::new(None)),
-            delete_session_handler: Arc::new(RwLock::new(None)),
+impl From<TransportConfig> for JsonRpcTransportConfig {
+    fn from(config: TransportConfig) -> Self {
+        match config {
+            TransportConfig::Stdio => JsonRpcTransportConfig::Stdio,
+            TransportConfig::UnixSocket { path } => JsonRpcTransportConfig::UnixSocket { path },
         }
-    }
-
-    /// Initialize handlers after server creation
-    async fn ensure_handlers_initialized(&self) -> Result<()> {
-        // Placeholder implementation - actual handlers will be created in user story phases
-        // For now, we just mark them as "initialized" to satisfy the routing requirements
-        debug!("Handler initialization placeholder - actual implementation in user story phases");
-        Ok(())
-    }
-
-    /// Send a streaming notification to the client
-    async fn send_stream_notification(&self, notification: StreamNotification) {
-        // For tower-lsp, we'll send custom notifications as "window/showMessage" for now
-        // In a real implementation, this would use custom notification types
-        let params = tower_lsp::lsp_types::ShowMessageParams {
-            typ: tower_lsp::lsp_types::MessageType::INFO,
-            message: format!("Stream: {}", serde_json::to_string(&notification).unwrap_or_else(|_| "notification".to_string())),
-        };
-
-        self.client.send_notification::<tower_lsp::lsp_types::notification::ShowMessage>(params).await;
-    }
-
-    /// Handle configure request
-    async fn handle_configure(&self, _params: ConfigureRequest) -> JsonRpcResult<ConfigureResponse> {
-        if let Err(e) = self.ensure_handlers_initialized().await {
-            error!("Failed to initialize handlers: {}", e);
-            return Err(create_error(
-                error_codes::CONFIGURATION_ERROR,
-                "Handler initialization failed",
-                None,
-            ));
-        }
-
-        // Placeholder implementation - actual handler will be implemented in User Story 1
-        info!("Configure request received (placeholder implementation)");
-
-        Err(create_error(
-            error_codes::CONFIGURATION_ERROR,
-            "Configure handler not yet implemented - will be created in User Story 1",
-            None,
-        ))
-    }
-
-    /// Handle delete session request
-    async fn handle_delete_session(&self, _params: DeleteSessionRequest) -> JsonRpcResult<DeleteSessionResponse> {
-        if let Err(e) = self.ensure_handlers_initialized().await {
-            error!("Failed to initialize handlers: {}", e);
-            return Err(create_error(
-                error_codes::SESSION_NOT_FOUND,
-                "Handler initialization failed",
-                None,
-            ));
-        }
-
-        // Placeholder implementation - actual handler will be implemented in User Story 2
-        info!("Delete session request received (placeholder implementation)");
-
-        Err(create_error(
-            error_codes::SESSION_NOT_FOUND,
-            "Delete session handler not yet implemented - will be created in User Story 2",
-            None,
-        ))
-    }
-
-    /// Handle fix generation request with streaming
-    async fn handle_generate_fix(&self, _params: GenerateFixRequest) -> JsonRpcResult<GenerateFixResponse> {
-        if let Err(e) = self.ensure_handlers_initialized().await {
-            error!("Failed to initialize handlers: {}", e);
-            return Err(create_error(
-                error_codes::AGENT_INITIALIZATION_FAILED,
-                "Handler initialization failed",
-                None,
-            ));
-        }
-
-        // Placeholder implementation - actual handler will be implemented in User Story 3
-        info!("Generate fix request received (placeholder implementation)");
-
-        Err(create_error(
-            error_codes::AGENT_INITIALIZATION_FAILED,
-            "Generate fix handler not yet implemented - will be created in User Story 3",
-            None,
-        ))
     }
 }
 
-#[tower_lsp::async_trait]
-impl LanguageServer for KaiakServer {
-    async fn initialize(&self, _params: InitializeParams) -> JsonRpcResult<InitializeResult> {
-        info!("Kaiak LSP server initializing");
+/// Create and start the Kaiak JSON-RPC server with the specified configuration
+pub async fn start_server(
+    server_config: Arc<ServerConfig>,
+    transport_config: Option<TransportConfig>,
+) -> Result<()> {
+    info!("Starting Kaiak JSON-RPC server");
 
-        Ok(InitializeResult {
-            capabilities: ServerCapabilities {
-                // We don't implement traditional LSP features, only custom JSON-RPC methods
-                ..Default::default()
+    // Use transport from configuration if not explicitly provided
+    let transport = if let Some(transport) = transport_config {
+        transport.into()
+    } else {
+        JsonRpcTransportConfig::from_init_config(&server_config.init_config)?
+    };
+
+    // Override the transport in server config for consistency
+    let mut config_copy = (*server_config).clone();
+    match &transport {
+        JsonRpcTransportConfig::Stdio => {
+            config_copy.init_config.transport = "stdio".to_string();
+            config_copy.init_config.socket_path = None;
+        },
+        JsonRpcTransportConfig::UnixSocket { path } => {
+            config_copy.init_config.transport = "socket".to_string();
+            config_copy.init_config.socket_path = Some(path.clone());
+        },
+        JsonRpcTransportConfig::Http { .. } => {
+            // HTTP transport not supported yet
+            anyhow::bail!("HTTP transport not implemented yet");
+        },
+    }
+    let server_config = Arc::new(config_copy);
+
+    // Create and start JSON-RPC server
+    let session_manager = Arc::new(crate::agent::GooseAgentManager::new());
+    let mut kaiak_server = create_kaiak_server(server_config.clone(), session_manager).await?;
+
+    info!("Starting Kaiak JSON-RPC server with {} transport", transport.description());
+    kaiak_server.start().await?;
+
+    // Keep the server running indefinitely
+    // In a real implementation, you might want to handle shutdown signals
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        if !kaiak_server.is_running().await {
+            error!("Server has stopped unexpectedly");
+            break;
+        }
+    }
+
+    info!("Kaiak JSON-RPC server stopped");
+    Ok(())
+}
+
+/// Start server with stdio transport (convenience function)
+pub async fn start_stdio_server(server_config: Arc<ServerConfig>) -> Result<()> {
+    start_server(server_config, Some(TransportConfig::Stdio)).await
+}
+
+/// Start server with Unix socket transport (convenience function)
+pub async fn start_unix_socket_server(
+    server_config: Arc<ServerConfig>,
+    socket_path: String,
+) -> Result<()> {
+    start_server(server_config, Some(TransportConfig::UnixSocket { path: socket_path })).await
+}
+
+/// Create a default server configuration for testing and development
+pub fn create_default_server_config() -> ServerConfig {
+    ServerConfig::default()
+}
+
+/// Validate server configuration before starting
+pub fn validate_server_config(config: &ServerConfig) -> Result<()> {
+    config.validate()?;
+
+    // Additional validation specific to server startup
+    match config.init_config.transport.as_str() {
+        "stdio" => {
+            debug!("Using stdio transport - no additional validation needed");
+        },
+        "socket" => {
+            if config.init_config.socket_path.is_none() {
+                anyhow::bail!("Socket path is required when using socket transport");
+            }
+
+            let socket_path = config.init_config.socket_path.as_ref().unwrap();
+            if socket_path.is_empty() {
+                anyhow::bail!("Socket path cannot be empty");
+            }
+
+            debug!("Using Unix socket transport: {}", socket_path);
+        },
+        other => {
+            anyhow::bail!("Unsupported transport type: {}", other);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::configuration::{InitConfig, BaseConfig};
+
+    fn create_test_server_config() -> ServerConfig {
+        ServerConfig {
+            init_config: InitConfig {
+                transport: "stdio".to_string(),
+                socket_path: None,
+                log_level: "info".to_string(),
+                max_concurrent_sessions: 10,
             },
-            server_info: Some(ServerInfo {
-                name: "kaiak".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            }),
-            ..Default::default()
-        })
-    }
-
-    async fn initialized(&self, _params: InitializedParams) {
-        info!("Kaiak LSP server initialized successfully");
-
-        // Initialize handlers in the background
-        if let Err(e) = self.ensure_handlers_initialized().await {
-            error!("Failed to initialize handlers: {}", e);
+            base_config: BaseConfig::default(),
         }
     }
 
-    async fn shutdown(&self) -> JsonRpcResult<()> {
-        info!("Kaiak LSP server shutting down");
-        Ok(())
-    }
+    #[test]
+    fn test_transport_config_conversion() {
+        let stdio_config = TransportConfig::Stdio;
+        let json_rpc_config: JsonRpcTransportConfig = stdio_config.into();
+        assert!(matches!(json_rpc_config, JsonRpcTransportConfig::Stdio));
 
-    async fn did_open(&self, _params: DidOpenTextDocumentParams) {
-        // Not used for our use case
-    }
+        let socket_config = TransportConfig::UnixSocket {
+            path: "/tmp/test.sock".to_string(),
+        };
+        let json_rpc_config: JsonRpcTransportConfig = socket_config.into();
 
-    async fn did_change(&self, _params: DidChangeTextDocumentParams) {
-        // Not used for our use case
-    }
-
-    async fn did_save(&self, _params: DidSaveTextDocumentParams) {
-        // Not used for our use case
-    }
-
-    async fn did_close(&self, _params: DidCloseTextDocumentParams) {
-        // Not used for our use case
-    }
-
-    // Custom request handlers for the three-endpoint API
-    async fn execute_command(&self, params: ExecuteCommandParams) -> JsonRpcResult<Option<Value>> {
-        match params.command.as_str() {
-            methods::CONFIGURE => {
-                if let Some(arg) = params.arguments.get(0) {
-                    match serde_json::from_value::<ConfigureRequest>(arg.clone()) {
-                        Ok(req) => self.handle_configure(req).await.map(|resp| {
-                            Some(serde_json::to_value(resp).unwrap_or(Value::Null))
-                        }),
-                        Err(e) => Err(create_error(
-                            error_codes::RESPONSE_VALIDATION_FAILED,
-                            &format!("Invalid request format: {}", e),
-                            None,
-                        )),
-                    }
-                } else {
-                    Err(create_error(
-                        error_codes::RESPONSE_VALIDATION_FAILED,
-                        "Missing request parameters",
-                        None,
-                    ))
-                }
-            }
-            methods::GENERATE_FIX => {
-                if let Some(arg) = params.arguments.get(0) {
-                    match serde_json::from_value::<GenerateFixRequest>(arg.clone()) {
-                        Ok(req) => self.handle_generate_fix(req).await.map(|resp| {
-                            Some(serde_json::to_value(resp).unwrap_or(Value::Null))
-                        }),
-                        Err(e) => Err(create_error(
-                            error_codes::RESPONSE_VALIDATION_FAILED,
-                            &format!("Invalid request format: {}", e),
-                            None,
-                        )),
-                    }
-                } else {
-                    Err(create_error(
-                        error_codes::RESPONSE_VALIDATION_FAILED,
-                        "Missing request parameters",
-                        None,
-                    ))
-                }
-            }
-            methods::DELETE_SESSION => {
-                if let Some(arg) = params.arguments.get(0) {
-                    match serde_json::from_value::<DeleteSessionRequest>(arg.clone()) {
-                        Ok(req) => self.handle_delete_session(req).await.map(|resp| {
-                            Some(serde_json::to_value(resp).unwrap_or(Value::Null))
-                        }),
-                        Err(e) => Err(create_error(
-                            error_codes::RESPONSE_VALIDATION_FAILED,
-                            &format!("Invalid request format: {}", e),
-                            None,
-                        )),
-                    }
-                } else {
-                    Err(create_error(
-                        error_codes::RESPONSE_VALIDATION_FAILED,
-                        "Missing request parameters",
-                        None,
-                    ))
-                }
-            }
-            _ => Err(Error {
-                code: tower_lsp::jsonrpc::ErrorCode::ServerError(-32601),
-                message: format!("Method not found: {} - only kaiak/configure, kaiak/generate_fix, and kaiak/delete_session are supported", params.command).into(),
-                data: Some(serde_json::json!({
-                    "supported_methods": ["kaiak/configure", "kaiak/generate_fix", "kaiak/delete_session"],
-                    "requested_method": params.command
-                })),
-            }),
+        match json_rpc_config {
+            JsonRpcTransportConfig::UnixSocket { path } => {
+                assert_eq!(path, "/tmp/test.sock");
+            },
+            _ => assert!(false, "Expected UnixSocket transport"),
         }
     }
-}
 
-/// Create and start the Kaiak LSP server with the specified transport
-pub async fn start_server(transport_config: crate::server::TransportConfig) -> Result<()> {
-    info!("Starting Kaiak LSP server");
+    #[test]
+    fn test_validate_server_config() {
+        let config = create_test_server_config();
+        assert!(validate_server_config(&config).is_ok());
 
-    match transport_config {
-        crate::server::TransportConfig::Stdio => {
-            info!("Starting server with stdio transport");
+        let mut invalid_config = config.clone();
+        invalid_config.init_config.transport = "invalid".to_string();
+        assert!(validate_server_config(&invalid_config).is_err());
 
-            let stdin = tokio::io::stdin();
-            let stdout = tokio::io::stdout();
+        let mut socket_config = config.clone();
+        socket_config.init_config.transport = "socket".to_string();
+        socket_config.init_config.socket_path = None;
+        assert!(validate_server_config(&socket_config).is_err());
 
-            let (service, socket) = LspService::new(|client| KaiakServer::new(client));
-            Server::new(stdin, stdout, socket).serve(service).await;
+        socket_config.init_config.socket_path = Some("/tmp/test.sock".to_string());
+        assert!(validate_server_config(&socket_config).is_ok());
+    }
 
-            info!("Kaiak LSP server stopped");
-            Ok(())
-        }
-        crate::server::TransportConfig::UnixSocket { path } => {
-            #[cfg(unix)]
-            {
-                use tokio::net::UnixListener;
-
-                info!("Starting server with Unix socket: {}", path);
-
-                // Remove existing socket file if it exists
-                let _ = std::fs::remove_file(&path);
-
-                let listener = UnixListener::bind(&path)?;
-                info!("Unix socket server listening at: {}", path);
-
-                loop {
-                    let (stream, _) = listener.accept().await?;
-                    let (read, write) = stream.into_split();
-
-                    let (service, socket) = LspService::new(|client| KaiakServer::new(client));
-
-                    tokio::spawn(async move {
-                        Server::new(read, write, socket).serve(service).await;
-                    });
-                }
-            }
-
-            #[cfg(not(unix))]
-            {
-                anyhow::bail!("Unix sockets are not supported on this platform");
-            }
-        }
+    #[test]
+    fn test_create_default_server_config() {
+        let config = create_default_server_config();
+        assert!(validate_server_config(&config).is_ok());
     }
 }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use kaiak::config::{init_logging, settings::ServerSettings};
+use kaiak::logging::init_logging;
+use kaiak::models::configuration::{ServerConfig, ConfigurationHierarchy};
 use kaiak::server::{start_server, TransportConfig};
 use tracing::{error, info};
 

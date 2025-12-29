@@ -15,10 +15,10 @@
 
 **Purpose**: Project initialization and configuration unification foundation
 
-- [ ] T001 Delete src/config/ directory and consolidate all configuration logic
-- [ ] T002 [P] Create src/logging.rs by moving logging setup from src/config/logging.rs
-- [ ] T003 [P] Create src/models/client.rs for ClientConnection and ClientState entities
-- [ ] T004 [P] Create src/client/ module directory structure
+- [X] T001 Delete src/config/ directory and consolidate all configuration logic
+- [X] T002 [P] Create src/logging.rs by moving logging setup from src/config/logging.rs
+- [X] T003 [P] Create src/models/client.rs for ClientConnection and ClientState entities
+- [X] T004 [P] Create src/client/ module directory structure
 
 ---
 
@@ -28,13 +28,16 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Move src/config/settings.rs content to src/models/configuration.rs with unified ServerConfig structure
+- [ ] T005 Move src/config/settings.rs content to src/models/configuration.rs with unified configuration structures (ServerConfig, InitConfig, BaseConfig, AgentConfig as defined in data-model.md)
 - [ ] T006 [P] Implement ConfigurationHierarchy in src/models/configuration.rs with precedence loading (CLI > user config > defaults)
 - [ ] T007 [P] Add ClientError variants to src/models/errors.rs for connection and validation failures
 - [ ] T008 [P] Create src/client/transport.rs with JsonRpcClient for Unix socket communication
 - [ ] T009 Fix handler wiring in src/server/server.rs to connect existing handlers to server transport
 - [ ] T010 [P] Implement ClientState persistence methods (load, save, connect, disconnect) in src/models/client.rs
 - [ ] T011 [P] Add JSON-RPC client request/response handling in src/client/transport.rs
+- [ ] T011a [P] Add socket file creation and permission validation in src/client/transport.rs
+- [ ] T011b [P] Add socket path validation (writeable directory, valid path format) in src/models/client.rs
+- [ ] T011c [P] Add connection health checking (socket exists, server responds) in src/client/transport.rs
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -233,6 +236,6 @@ With multiple developers:
 - Stop at any checkpoint to validate story independently
 - All JSON-RPC communication follows contracts/jsonrpc-api.json specification
 
-**Total Tasks**: 48 tasks across 8 phases
-**Parallel Opportunities**: 32 tasks can run in parallel within their phases
-**MVP Scope**: Phases 1-3 (User Story 1 - Server Management) - 17 tasks
+**Total Tasks**: 51 tasks across 8 phases
+**Parallel Opportunities**: 35 tasks can run in parallel within their phases
+**MVP Scope**: Phases 1-3 (User Story 1 - Server Management) - 20 tasks
