@@ -4,7 +4,7 @@
 //! and dispatch them to registered method handlers.
 
 use crate::jsonrpc::{
-    protocol::{JsonRpcRequest, JsonRpcResponse, JsonRpcError, error_codes},
+    protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, JsonRpcError},
     transport::{Transport, TransportConfig},
 };
 use anyhow::{anyhow, Result};
@@ -12,10 +12,15 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{debug, error, info, instrument, warn};
+use tokio::sync::{mpsc, Mutex};
+use tracing::{debug, error, info, instrument, trace, warn};
 
-/// Method handler function signature
+/// Sender for streaming notifications from handlers
+pub type NotificationSender = mpsc::UnboundedSender<JsonRpcNotification>;
+
+/// Receiver for notifications (used internally by the server)
+pub type NotificationReceiver = mpsc::UnboundedReceiver<JsonRpcNotification>;
+
 /// Takes JSON parameters and returns a JSON result
 pub type MethodHandler = Arc<
     dyn Fn(Option<serde_json::Value>) -> BoxFuture<'static, Result<serde_json::Value, JsonRpcError>>
@@ -23,26 +28,55 @@ pub type MethodHandler = Arc<
         + Sync,
 >;
 
-/// JSON-RPC server
+/// Streaming method handler function signature
+/// Takes JSON parameters and a notification sender for streaming updates
+pub type StreamingMethodHandler = Arc<
+    dyn Fn(Option<serde_json::Value>, NotificationSender) -> BoxFuture<'static, Result<serde_json::Value, JsonRpcError>>
+        + Send
+        + Sync,
+>;
+
+/// Internal handler storage - can be either legacy or streaming
+#[derive(Clone)]
+enum HandlerType {
+    NonStreaming(MethodHandler),
+    Streaming(StreamingMethodHandler),
+}
+
+/// JSON-RPC server with notification streaming support
 pub struct JsonRpcServer {
     transport: Box<dyn Transport>,
-    methods: Arc<Mutex<HashMap<String, MethodHandler>>>,
+    methods: Arc<Mutex<HashMap<String, HandlerType>>>,
     running: Arc<Mutex<bool>>,
+    /// Sender for notifications - clone and pass to handlers
+    notification_tx: NotificationSender,
+    /// Receiver for notifications - consumed by the server loop
+    notification_rx: Arc<Mutex<NotificationReceiver>>,
 }
 
 impl JsonRpcServer {
     /// Create a new JSON-RPC server with the specified transport
     pub async fn new(transport_config: TransportConfig) -> Result<Self> {
         let transport = transport_config.create_transport().await?;
+        let (notification_tx, notification_rx) = mpsc::unbounded_channel();
 
         Ok(Self {
             transport,
             methods: Arc::new(Mutex::new(HashMap::new())),
             running: Arc::new(Mutex::new(false)),
+            notification_tx,
+            notification_rx: Arc::new(Mutex::new(notification_rx)),
         })
     }
 
-    /// Register a method handler
+    /// Get a clone of the notification sender
+    /// 
+    /// Pass this to handlers that need to stream notifications back to the client.
+    pub fn notification_sender(&self) -> NotificationSender {
+        self.notification_tx.clone()
+    }
+
+    /// Register a method handler (legacy, without notification support)
     pub async fn register_method<F, Fut>(
         &self,
         method_name: String,
@@ -57,13 +91,13 @@ impl JsonRpcServer {
         });
 
         let mut methods = self.methods.lock().await;
-        methods.insert(method_name.clone(), wrapped_handler);
+        methods.insert(method_name.clone(), HandlerType::NonStreaming(wrapped_handler));
 
         debug!("Registered method: {}", method_name);
         Ok(())
     }
 
-    /// Register an async method handler with error conversion
+    /// Register an async method handler with error conversion (legacy, without notification support)
     pub async fn register_async_method<F, Fut, E>(
         &self,
         method_name: String,
@@ -85,9 +119,37 @@ impl JsonRpcServer {
         });
 
         let mut methods = self.methods.lock().await;
-        methods.insert(method_name.clone(), wrapped_handler);
+        methods.insert(method_name.clone(), HandlerType::NonStreaming(wrapped_handler));
 
         debug!("Registered async method: {}", method_name);
+        Ok(())
+    }
+
+    /// Register a streaming method handler that can send notifications during execution
+    pub async fn register_streaming_method<F, Fut, E>(
+        &self,
+        method_name: String,
+        handler: F,
+    ) -> Result<()>
+    where
+        F: Fn(Option<serde_json::Value>, NotificationSender) -> Fut + Send + Sync + 'static + Clone,
+        Fut: std::future::Future<Output = Result<serde_json::Value, E>> + Send + 'static,
+        E: Into<JsonRpcError> + Send + 'static,
+    {
+        let wrapped_handler: StreamingMethodHandler = Arc::new(move |params, notifier| {
+            let handler_clone = handler.clone();
+            Box::pin(async move {
+                match handler_clone(params, notifier).await {
+                    Ok(result) => Ok(result),
+                    Err(e) => Err(e.into()),
+                }
+            })
+        });
+
+        let mut methods = self.methods.lock().await;
+        methods.insert(method_name.clone(), HandlerType::Streaming(wrapped_handler));
+
+        debug!("Registered streaming method: {}", method_name);
         Ok(())
     }
 
@@ -111,9 +173,13 @@ impl JsonRpcServer {
         info!("Starting JSON-RPC server with {} transport", self.transport.description());
 
         while self.is_running().await {
+            // Flush any pending notifications before processing next request
+            self.flush_notifications().await;
+            
             match self.handle_single_request().await {
                 Ok(()) => {
-                    // Continue processing
+                    // Flush notifications that may have been queued during request handling
+                    self.flush_notifications().await;
                 }
                 Err(e) => {
                     error!("Error handling request: {}", e);
@@ -124,6 +190,24 @@ impl JsonRpcServer {
 
         info!("JSON-RPC server stopped");
         Ok(())
+    }
+
+    /// Flush all pending notifications to the transport
+    async fn flush_notifications(&mut self) {
+        let mut rx = self.notification_rx.lock().await;
+        
+        // Drain all pending notifications
+        while let Ok(notification) = rx.try_recv() {
+            trace!("Sending notification: {}", notification.method);
+            if let Err(e) = self.transport.write_notification(notification).await {
+                error!("Failed to send notification: {}", e);
+            }
+        }
+    }
+
+    /// Send a notification immediately (for use outside request handlers)
+    pub async fn send_notification(&mut self, notification: JsonRpcNotification) -> Result<()> {
+        self.transport.write_notification(notification).await
     }
 
     /// Stop the server
@@ -190,7 +274,7 @@ impl JsonRpcServer {
 
         // Look up method handler
         let methods = self.methods.lock().await;
-        let handler = match methods.get(&request.method) {
+        let handler_type = match methods.get(&request.method) {
             Some(handler) => handler.clone(),
             None => {
                 drop(methods); // Release lock early
@@ -204,8 +288,17 @@ impl JsonRpcServer {
         };
         drop(methods); // Release lock
 
-        // Execute the method handler
-        match handler(request.params).await {
+        // Execute the method handler based on type
+        let result = match handler_type {
+            HandlerType::NonStreaming(handler) => handler(request.params).await,
+            HandlerType::Streaming(handler) => {
+                // Pass a clone of the notification sender to the streaming handler
+                let notifier = self.notification_tx.clone();
+                handler(request.params, notifier).await
+            }
+        };
+
+        match result {
             Ok(result) => {
                 if !is_notification {
                     Some(JsonRpcResponse::success(result, request_id))
@@ -239,7 +332,7 @@ impl JsonRpcServer {
 /// Builder for JSON-RPC server
 pub struct ServerBuilder {
     transport_config: Option<TransportConfig>,
-    methods: HashMap<String, MethodHandler>,
+    methods: HashMap<String, HandlerType>,
 }
 
 impl ServerBuilder {
@@ -281,7 +374,32 @@ impl ServerBuilder {
             Box::pin(handler(params))
         });
 
-        self.methods.insert(method_name, wrapped_handler);
+        self.methods.insert(method_name, HandlerType::NonStreaming(wrapped_handler));
+        self
+    }
+
+    /// Register a streaming method during building
+    pub fn register_streaming_method<F, Fut, E>(
+        mut self,
+        method_name: String,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(Option<serde_json::Value>, NotificationSender) -> Fut + Send + Sync + 'static + Clone,
+        Fut: std::future::Future<Output = Result<serde_json::Value, E>> + Send + 'static,
+        E: Into<JsonRpcError> + Send + 'static,
+    {
+        let wrapped_handler: StreamingMethodHandler = Arc::new(move |params, notifier| {
+            let handler_clone = handler.clone();
+            Box::pin(async move {
+                match handler_clone(params, notifier).await {
+                    Ok(result) => Ok(result),
+                    Err(e) => Err(e.into()),
+                }
+            })
+        });
+
+        self.methods.insert(method_name, HandlerType::Streaming(wrapped_handler));
         self
     }
 
@@ -335,6 +453,24 @@ where
         let handler_clone = handler.clone();
         Box::pin(async move {
             match handler_clone(params).await {
+                Ok(result) => Ok(result),
+                Err(e) => Err(e.into()),
+            }
+        })
+    })
+}
+
+/// Helper function to create a streaming method handler
+pub fn create_streaming_method_handler<F, Fut, E>(handler: F) -> StreamingMethodHandler
+where
+    F: Fn(Option<serde_json::Value>, NotificationSender) -> Fut + Send + Sync + 'static + Clone,
+    Fut: std::future::Future<Output = Result<serde_json::Value, E>> + Send + 'static,
+    E: Into<JsonRpcError> + Send + 'static,
+{
+    Arc::new(move |params, notifier| {
+        let handler_clone = handler.clone();
+        Box::pin(async move {
+            match handler_clone(params, notifier).await {
                 Ok(result) => Ok(result),
                 Err(e) => Err(e.into()),
             }

@@ -3,7 +3,7 @@
 //! Implements LSP-style message framing with Content-Length headers
 //! and support for different transport types (stdio, IPC, HTTP).
 
-use crate::jsonrpc::protocol::{JsonRpcRequest, JsonRpcResponse};
+use crate::jsonrpc::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use std::path::Path;
@@ -19,11 +19,24 @@ pub trait Transport: Send {
     /// Write a JSON-RPC response to the transport
     async fn write_response(&mut self, response: JsonRpcResponse) -> Result<()>;
 
+    /// Write a JSON-RPC notification to the transport (server-to-client)
+    async fn write_notification(&mut self, notification: JsonRpcNotification) -> Result<()>;
+
     /// Close the transport connection
     async fn close(&mut self) -> Result<()>;
 
     /// Get transport description for logging
     fn description(&self) -> &'static str;
+}
+
+/// Trait for the write-half of a transport (for sharing with notification senders)
+#[async_trait]
+pub trait TransportWriter: Send + Sync {
+    /// Write a JSON-RPC notification
+    async fn write_notification(&mut self, notification: JsonRpcNotification) -> Result<()>;
+    
+    /// Write a JSON-RPC response
+    async fn write_response(&mut self, response: JsonRpcResponse) -> Result<()>;
 }
 
 /// Stdio transport using LSP-style Content-Length headers
@@ -117,6 +130,11 @@ impl Transport for StdioTransport {
 
     async fn write_response(&mut self, response: JsonRpcResponse) -> Result<()> {
         let content = serde_json::to_string(&response)?;
+        self.write_lsp_message(&content).await
+    }
+
+    async fn write_notification(&mut self, notification: JsonRpcNotification) -> Result<()> {
+        let content = serde_json::to_string(&notification)?;
         self.write_lsp_message(&content).await
     }
 
@@ -234,6 +252,11 @@ impl Transport for IpcTransport {
 
     async fn write_response(&mut self, response: JsonRpcResponse) -> Result<()> {
         let content = serde_json::to_string(&response)?;
+        self.write_lsp_message(&content).await
+    }
+
+    async fn write_notification(&mut self, notification: JsonRpcNotification) -> Result<()> {
+        let content = serde_json::to_string(&notification)?;
         self.write_lsp_message(&content).await
     }
 

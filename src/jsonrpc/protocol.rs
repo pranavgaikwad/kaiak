@@ -47,6 +47,39 @@ pub struct JsonRpcBatch(pub Vec<JsonRpcRequest>);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcBatchResponse(pub Vec<JsonRpcResponse>);
 
+/// JSON-RPC 2.0 Notification (server-to-client, no response expected)
+/// 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonRpcNotification {
+    /// JSON-RPC version (always "2.0")
+    pub jsonrpc: String,
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+}
+
+impl JsonRpcNotification {
+    /// Create a new notification
+    pub fn new(method: impl Into<String>, params: Option<serde_json::Value>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            method: method.into(),
+            params,
+        }
+    }
+
+    /// Create a progress notification (common pattern)
+    pub fn progress(token: impl Into<String>, value: serde_json::Value) -> Self {
+        Self::new(
+            "$/progress",
+            Some(serde_json::json!({
+                "token": token.into(),
+                "value": value,
+            })),
+        )
+    }
+}
+
 /// Standard JSON-RPC 2.0 error codes
 pub mod error_codes {
     pub const PARSE_ERROR: i32 = -32700;
@@ -212,7 +245,6 @@ impl From<crate::KaiakError> for JsonRpcError {
             crate::KaiakError::ResourceExhausted(_) => -32015,
             crate::KaiakError::Io { .. } => -32016,
             crate::KaiakError::Serialization { .. } => -32017,
-            crate::KaiakError::SessionNotFound(_) => -32003,
             crate::KaiakError::Transport { .. } => -32001,
             crate::KaiakError::InvalidWorkspacePath(_) => -32011,
             crate::KaiakError::Internal(_) => -32603,

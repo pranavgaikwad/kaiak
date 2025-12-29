@@ -19,9 +19,12 @@ pub mod methods;
 pub mod core;
 
 // Re-export main types for convenient use
-pub use protocol::{JsonRpcRequest, JsonRpcResponse, JsonRpcError};
+pub use protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, JsonRpcError};
 pub use transport::{Transport, TransportConfig, StdioTransport, IpcTransport};
-pub use server::{JsonRpcServer, ServerBuilder, MethodHandler};
+pub use server::{
+    JsonRpcServer, ServerBuilder, MethodHandler, 
+    StreamingMethodHandler, NotificationSender, NotificationReceiver,
+};
 
 // Legacy re-exports for existing code compatibility
 pub use methods::{GENERATE_FIX, DELETE_SESSION};
@@ -77,12 +80,13 @@ pub async fn register_kaiak_methods(
         generate_fix::{GenerateFixRequest, GenerateFixHandler},
         delete_session::{DeleteSessionRequest, DeleteSessionHandler},
     };
-    // Register generate_fix method
+    
+    // Register generate_fix method (streaming - sends notifications during execution)
     {
         let agent_manager = agent_manager.clone();
-        server.register_async_method(
+        server.register_streaming_method(
             GENERATE_FIX.to_string(),
-            move |params| {
+            move |params, notifier| {
                 let agent_manager = agent_manager.clone();
                 let base_config = base_config.clone();
                 async move {
@@ -97,7 +101,7 @@ pub async fn register_kaiak_methods(
 
                     let handler = GenerateFixHandler::new(agent_manager, base_config.clone());
                     let request_inner = kaiak_request.inner.clone();
-                    let response = handler.handle_generate_fix(request_inner).await
+                    let response = handler.handle_generate_fix(request_inner, notifier).await
                         .map_err(|e| crate::jsonrpc::JsonRpcError::from(e))?;
 
                     let kaiak_response = KaiakResponse::from_request(response, &kaiak_request);
@@ -112,7 +116,7 @@ pub async fn register_kaiak_methods(
         ).await?;
     }
 
-    // Register delete_session method
+    // Register delete_session method (non-streaming)
     {
         let agent_manager = agent_manager.clone();
         server.register_async_method(
@@ -146,6 +150,6 @@ pub async fn register_kaiak_methods(
         ).await?;
     }
 
-    tracing::info!("Registered {} Kaiak JSON-RPC methods", 3);
+    tracing::info!("Registered {} Kaiak JSON-RPC methods", 2);
     Ok(())
 }

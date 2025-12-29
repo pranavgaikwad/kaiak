@@ -7,6 +7,7 @@ use validator::Validate;
 
 use crate::models::{configuration::AgentConfig, incidents::MigrationIncident};
 use crate::agent::GooseAgentManager;
+use crate::jsonrpc::{JsonRpcNotification, NotificationSender};
 use crate::KaiakResult;
 
 /// Request type for kaiak/generate_fix endpoint
@@ -53,8 +54,12 @@ impl GenerateFixHandler {
         }
     }
 
-    /// Handle generate fix request
-    pub async fn handle_generate_fix(&self, request: GenerateFixRequest) -> KaiakResult<GenerateFixResponse> {
+    /// Handle generate fix request with streaming notifications
+    pub async fn handle_generate_fix(
+        &self, 
+        request: GenerateFixRequest,
+        notifier: NotificationSender,
+    ) -> KaiakResult<GenerateFixResponse> {
         info!("Processing generate_fix request for session: {}", request.session_id);
 
         // Validate request using serde validator
@@ -75,7 +80,6 @@ impl GenerateFixHandler {
                 None,
             ));
         }
-
         let request_id = Uuid::new_v4().to_string();
         {
             let mut active = self.active_requests.write().await;
@@ -84,7 +88,8 @@ impl GenerateFixHandler {
 
         info!("Processing {} migration incidents", request.incidents.len());
 
-        match self.initiate_agent_processing(&request_id, &request).await {
+
+        match self.initiate_agent_processing(&request_id, &request, &notifier).await {
             Ok(_) => {
                 info!("Generate fix request {} initiated successfully", request_id);
                 Ok(GenerateFixResponse {
@@ -111,6 +116,38 @@ impl GenerateFixHandler {
         }
     }
 
+    /// Send a progress notification to the client
+    fn send_progress(
+        &self,
+        notifier: &NotificationSender,
+        session_id: &str,
+        stage: &str,
+        progress: u8,
+        data: Option<serde_json::Value>,
+    ) {
+        let mut params = serde_json::json!({
+            "session_id": session_id,
+            "stage": stage,
+            "progress": progress,
+        });
+        
+        if let Some(extra) = data {
+            if let Some(obj) = params.as_object_mut() {
+                if let Some(extra_obj) = extra.as_object() {
+                    for (k, v) in extra_obj {
+                        obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+
+        let notification = JsonRpcNotification::new("kaiak/generateFix/progress", Some(params));
+        
+        if let Err(e) = notifier.send(notification) {
+            warn!("Failed to send progress notification: {}", e);
+        }
+    }
+
     /// Get status of active requests
     pub async fn get_active_request_count(&self) -> usize {
         let active = self.active_requests.read().await;
@@ -118,7 +155,12 @@ impl GenerateFixHandler {
     }
 
     /// Initiate agent processing with Goose session management
-    async fn initiate_agent_processing(&self, request_id: &str, request: &GenerateFixRequest) -> KaiakResult<()> {
+    async fn initiate_agent_processing(
+        &self, 
+        request_id: &str, 
+        request: &GenerateFixRequest,
+        notifier: &NotificationSender,
+    ) -> KaiakResult<()> {
         debug!("Initiating agent processing for request: {}", request_id);
 
         match self.agent_manager.lock_session(&request.session_id).await {
@@ -132,8 +174,8 @@ impl GenerateFixHandler {
         }
 
         // Get or create session using Goose SessionManager
-        let session_info = match self.agent_manager.get_or_create_session(&request.session_id, &request.agent_config).await {
-            Ok(session_info) => {
+        match self.agent_manager.get_or_create_session(&request.session_id, &request.agent_config).await {
+            Ok(_session_info) => {
                 debug!("Session ready for processing: {} (workspace: {:?})",
                        request.session_id,
                        request.agent_config.workspace);
