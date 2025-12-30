@@ -220,7 +220,6 @@ async fn generate_fix_command(
     }).await?;
 
     // Pretty print the final result
-    println!("\n--- Final Result ---");
     let output = serde_json::to_string_pretty(&result)?;
     println!("{}", output);
 

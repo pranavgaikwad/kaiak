@@ -18,7 +18,6 @@ pub mod server;
 pub mod methods;
 pub mod core;
 
-// Re-export main types for convenient use
 pub use protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, JsonRpcError};
 pub use transport::{Transport, TransportConfig, StdioTransport, IpcTransport};
 pub use server::{
@@ -26,20 +25,13 @@ pub use server::{
     StreamingMethodHandler, NotificationSender, NotificationReceiver,
 };
 
-// Legacy re-exports for existing code compatibility
 pub use methods::{GENERATE_FIX, DELETE_SESSION};
 pub use core::{KaiakRequest, KaiakResponse, ResponseMetadata};
 
-/// Version of the JSON-RPC protocol used by Kaiak
 pub const JSONRPC_VERSION: &str = "2.0";
-
-/// Default timeout for client requests (in seconds)
 pub const DEFAULT_REQUEST_TIMEOUT: u64 = 300;
-
-/// Default maximum number of concurrent connections for server
 pub const DEFAULT_MAX_CONNECTIONS: usize = 10;
 
-/// Helper function to create a server with Kaiak handlers
 pub async fn create_kaiak_server(
     server_config: std::sync::Arc<crate::models::configuration::ServerConfig>,
     agent_manager: std::sync::Arc<crate::agent::GooseAgentManager>,
@@ -61,16 +53,24 @@ pub async fn create_kaiak_server(
         }
     };
 
-    // Create server with appropriate transport
     let server = JsonRpcServer::new(transport_config).await?;
 
-    // Register Kaiak methods
     register_kaiak_methods(&server, agent_manager, std::sync::Arc::new(server_config.base_config.clone())).await?;
 
     Ok(server)
 }
 
 /// Register all Kaiak JSON-RPC methods with the server
+/// 
+/// Methods accept raw request types directly (no wrapper required).
+/// For example, `generate_fix` accepts:
+/// ```json
+/// {
+///   "session_id": "...",
+///   "incidents": [...],
+///   "agent_config": {...}
+/// }
+/// ```
 pub async fn register_kaiak_methods(
     server: &JsonRpcServer,
     agent_manager: std::sync::Arc<crate::agent::GooseAgentManager>,
@@ -91,21 +91,19 @@ pub async fn register_kaiak_methods(
                 let base_config = base_config.clone();
                 async move {
                     let params_value = params.unwrap_or(serde_json::Value::Null);
-                    let kaiak_request: KaiakRequest<GenerateFixRequest> =
-                        serde_json::from_value(params_value)
-                        .map_err(|e| crate::jsonrpc::JsonRpcError::custom(
-                            crate::jsonrpc::protocol::error_codes::INVALID_PARAMS,
-                            format!("Failed to parse parameters: {}", e),
-                            None,
-                        ))?;
+                    
+                    // Parse directly as GenerateFixRequest (no wrapper)
+                    let request: GenerateFixRequest = serde_json::from_value(params_value.clone())
+                        .map_err(|e| {
+                            create_parse_error::<GenerateFixRequest>(&e, &params_value)
+                        })?;
 
                     let handler = GenerateFixHandler::new(agent_manager, base_config.clone());
-                    let request_inner = kaiak_request.inner.clone();
-                    let response = handler.handle_generate_fix(request_inner, notifier).await
+                    let response = handler.handle_generate_fix(request, notifier).await
                         .map_err(|e| crate::jsonrpc::JsonRpcError::from(e))?;
 
-                    let kaiak_response = KaiakResponse::from_request(response, &kaiak_request);
-                    serde_json::to_value(kaiak_response)
+                    // Return raw response (no wrapper)
+                    serde_json::to_value(response)
                         .map_err(|e| crate::jsonrpc::JsonRpcError::custom(
                             crate::jsonrpc::protocol::error_codes::INTERNAL_ERROR,
                             format!("Failed to serialize response: {}", e),
@@ -125,21 +123,19 @@ pub async fn register_kaiak_methods(
                 let agent_manager = agent_manager.clone();
                 async move {
                     let params_value = params.unwrap_or(serde_json::Value::Null);
-                    let kaiak_request: KaiakRequest<DeleteSessionRequest> =
-                        serde_json::from_value(params_value)
-                        .map_err(|e| crate::jsonrpc::JsonRpcError::custom(
-                            crate::jsonrpc::protocol::error_codes::INVALID_PARAMS,
-                            format!("Failed to parse parameters: {}", e),
-                            None,
-                        ))?;
+                    
+                    // Parse directly as DeleteSessionRequest (no wrapper)
+                    let request: DeleteSessionRequest = serde_json::from_value(params_value.clone())
+                        .map_err(|e| {
+                            create_parse_error::<DeleteSessionRequest>(&e, &params_value)
+                        })?;
 
                     let handler = DeleteSessionHandler::new(agent_manager);
-                    let request_inner = kaiak_request.inner.clone();
-                    let response = handler.handle_delete_session(request_inner).await
+                    let response = handler.handle_delete_session(request).await
                         .map_err(|e| crate::jsonrpc::JsonRpcError::from(e))?;
 
-                    let kaiak_response = KaiakResponse::from_request(response, &kaiak_request);
-                    serde_json::to_value(kaiak_response)
+                    // Return raw response (no wrapper)
+                    serde_json::to_value(response)
                         .map_err(|e| crate::jsonrpc::JsonRpcError::custom(
                             crate::jsonrpc::protocol::error_codes::INTERNAL_ERROR,
                             format!("Failed to serialize response: {}", e),
@@ -152,4 +148,31 @@ pub async fn register_kaiak_methods(
 
     tracing::info!("Registered {} Kaiak JSON-RPC methods", 2);
     Ok(())
+}
+
+fn create_parse_error<T>(error: &serde_json::Error, params: &serde_json::Value) -> JsonRpcError {
+    let type_name = std::any::type_name::<T>()
+        .rsplit("::")
+        .next()
+        .unwrap_or("Request");
+    
+    let received_fields: Vec<&str> = match params {
+        serde_json::Value::Object(map) => map.keys().map(|s| s.as_str()).collect(),
+        _ => vec![],
+    };
+    
+    let hint = if received_fields.is_empty() {
+        "No parameters provided".to_string()
+    } else {
+        format!("Received fields: {}", received_fields.join(", "))
+    };
+    
+    JsonRpcError::custom(
+        protocol::error_codes::INVALID_PARAMS,
+        format!("Invalid {}: {}. {}", type_name, error, hint),
+        Some(serde_json::json!({
+            "parse_error": error.to_string(),
+            "received": params,
+        })),
+    )
 }

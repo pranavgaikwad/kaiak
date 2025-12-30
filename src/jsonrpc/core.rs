@@ -9,13 +9,8 @@ use validator::Validate;
 
 /// Trait for registering Kaiak JSON-RPC methods with consistent patterns
 pub trait KaiakJsonRpcHandler {
-    /// Register all methods provided by this handler
     fn register_methods(&self, server: &crate::jsonrpc::JsonRpcServer);
-
-    /// Get the handler name for logging and debugging
     fn handler_name(&self) -> &'static str;
-
-    /// Get handler version for compatibility checking
     fn handler_version(&self) -> &'static str {
         env!("CARGO_PKG_VERSION")
     }

@@ -50,22 +50,19 @@ pub struct JsonRpcServer {
     running: Arc<Mutex<bool>>,
     /// Sender for notifications - clone and pass to handlers
     notification_tx: NotificationSender,
-    /// Receiver for notifications - consumed by the server loop
-    notification_rx: Arc<Mutex<NotificationReceiver>>,
 }
 
 impl JsonRpcServer {
     /// Create a new JSON-RPC server with the specified transport
     pub async fn new(transport_config: TransportConfig) -> Result<Self> {
         let transport = transport_config.create_transport().await?;
-        let (notification_tx, notification_rx) = mpsc::unbounded_channel();
+        let (notification_tx, _notification_rx) = mpsc::unbounded_channel();
 
         Ok(Self {
             transport,
             methods: Arc::new(Mutex::new(HashMap::new())),
             running: Arc::new(Mutex::new(false)),
             notification_tx,
-            notification_rx: Arc::new(Mutex::new(notification_rx)),
         })
     }
 
@@ -160,6 +157,9 @@ impl JsonRpcServer {
     }
 
     /// Start the server and process requests
+    /// 
+    /// Uses a concurrent architecture where notifications are sent immediately
+    /// as they are queued by handlers, rather than being buffered.
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> Result<()> {
         {
@@ -173,13 +173,9 @@ impl JsonRpcServer {
         info!("Starting JSON-RPC server with {} transport", self.transport.description());
 
         while self.is_running().await {
-            // Flush any pending notifications before processing next request
-            self.flush_notifications().await;
-            
-            match self.handle_single_request().await {
+            match self.handle_single_request_with_streaming().await {
                 Ok(()) => {
-                    // Flush notifications that may have been queued during request handling
-                    self.flush_notifications().await;
+                    // Request handled successfully
                 }
                 Err(e) => {
                     error!("Error handling request: {}", e);
@@ -191,17 +187,163 @@ impl JsonRpcServer {
         info!("JSON-RPC server stopped");
         Ok(())
     }
-
-    /// Flush all pending notifications to the transport
-    async fn flush_notifications(&mut self) {
-        let mut rx = self.notification_rx.lock().await;
-        
-        // Drain all pending notifications
-        while let Ok(notification) = rx.try_recv() {
-            trace!("Sending notification: {}", notification.method);
-            if let Err(e) = self.transport.write_notification(notification).await {
-                error!("Failed to send notification: {}", e);
+    
+    /// Handle a single request while streaming notifications concurrently
+    async fn handle_single_request_with_streaming(&mut self) -> Result<()> {
+        // Read request from transport
+        let request = match self.transport.read_request().await {
+            Ok(req) => req,
+            Err(e) => {
+                error!("Failed to read request: {}", e);
+                let response = JsonRpcResponse::parse_error();
+                if let Err(write_err) = self.transport.write_response(response).await {
+                    error!("Failed to send error response: {}", write_err);
+                }
+                return Ok(());
             }
+        };
+
+        debug!("Received request: method={}, id={:?}", request.method, request.id);
+
+        // Create a fresh notification channel for this request
+        let (notification_tx, mut notification_rx) = mpsc::unbounded_channel::<JsonRpcNotification>();
+        
+        // Clone what we need for the spawned task
+        let methods = self.methods.clone();
+        let request_id = request.id.clone();
+        let is_notification = request.is_notification();
+        
+        // Spawn the request processing as a task so we can stream notifications concurrently
+        let mut process_handle = tokio::spawn(async move {
+            Self::process_request_static(methods, request, notification_tx).await
+        });
+
+        // Track if client is still connected
+        let mut client_connected = true;
+        let mut response: Option<JsonRpcResponse> = None;
+
+        // Track if notification channel is still open
+        let mut channel_open = true;
+        
+        // Process notifications as they arrive while waiting for the response
+        loop {
+            tokio::select! {
+                biased;  // Prioritize notifications
+                
+                // Send any pending notification immediately
+                notification = notification_rx.recv(), if client_connected && channel_open => {
+                    match notification {
+                        Some(notification) => {
+                            trace!("Streaming notification: {}", notification.method);
+                            if let Err(e) = self.transport.write_notification(notification).await {
+                                let is_broken_pipe = e.to_string().contains("Broken pipe") 
+                                    || e.to_string().contains("os error 32");
+                                if is_broken_pipe {
+                                    debug!("Client disconnected, stopping notification stream");
+                                    client_connected = false;
+                                    while notification_rx.try_recv().is_ok() {}
+                                } else {
+                                    warn!("Failed to send notification: {}", e);
+                                }
+                            }
+                        }
+                        None => {
+                            // Channel closed, handler must be done
+                            debug!("Notification channel closed");
+                            channel_open = false;
+                        }
+                    }
+                }
+                
+                // Check if request processing is complete
+                result = &mut process_handle, if response.is_none() => {
+                    match result {
+                        Ok(resp) => {
+                            response = resp;
+                        }
+                        Err(e) => {
+                            error!("Request handler panicked: {}", e);
+                            if !is_notification {
+                                response = Some(JsonRpcResponse::internal_error(
+                                    "Handler panicked",
+                                    request_id.clone(),
+                                ));
+                            }
+                        }
+                    }
+                    // Don't break yet - drain remaining notifications first
+                }
+            }
+            
+            // Exit when we have the response and notification channel is closed
+            if response.is_some() && !channel_open {
+                break;
+            }
+        }
+
+        // Send response (if not a notification request)
+        if let Some(response) = response {
+            if let Err(e) = self.transport.write_response(response).await {
+                error!("Failed to send response: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+    
+    /// Process a request (static version for spawning)
+    async fn process_request_static(
+        methods: Arc<Mutex<HashMap<String, HandlerType>>>,
+        request: JsonRpcRequest,
+        notification_tx: NotificationSender,
+    ) -> Option<JsonRpcResponse> {
+        let request_id = request.id.clone();
+        let is_notification = request.is_notification();
+
+        // Validate request
+        if let Err(error) = request.validate() {
+            if !is_notification {
+                return Some(JsonRpcResponse::error(error, request_id));
+            } else {
+                warn!("Invalid notification: {}", error.message);
+                return None;
+            }
+        }
+
+        // Look up method handler
+        let methods_guard = methods.lock().await;
+        let handler_type = match methods_guard.get(&request.method) {
+            Some(handler) => handler.clone(),
+            None => {
+                drop(methods_guard);
+                if !is_notification {
+                    return Some(JsonRpcResponse::method_not_found(&request.method, request_id));
+                } else {
+                    warn!("Method not found for notification: {}", request.method);
+                    return None;
+                }
+            }
+        };
+        drop(methods_guard);
+
+        // Execute the method handler
+        let result = match handler_type {
+            HandlerType::NonStreaming(handler) => {
+                handler(request.params.clone()).await
+            }
+            HandlerType::Streaming(handler) => {
+                handler(request.params.clone(), notification_tx).await
+            }
+        };
+
+        // Build response if needed
+        if !is_notification {
+            Some(match result {
+                Ok(value) => JsonRpcResponse::success(value, request_id),
+                Err(error) => JsonRpcResponse::error(error, request_id),
+            })
+        } else {
+            None
         }
     }
 
@@ -220,101 +362,6 @@ impl JsonRpcServer {
         self.transport.close().await?;
         info!("JSON-RPC server stopped");
         Ok(())
-    }
-
-    /// Handle a single JSON-RPC request
-    #[instrument(skip(self))]
-    async fn handle_single_request(&mut self) -> Result<()> {
-        // Read request from transport
-        let request = match self.transport.read_request().await {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Failed to read request: {}", e);
-                // Send parse error response
-                let response = JsonRpcResponse::parse_error();
-                if let Err(write_err) = self.transport.write_response(response).await {
-                    error!("Failed to send error response: {}", write_err);
-                }
-                return Ok(());
-            }
-        };
-
-        debug!("Received request: method={}, id={:?}", request.method, request.id);
-
-        // Process the request
-        let response = self.process_request(request).await;
-
-        // Send response (if not a notification)
-        if let Some(response) = response {
-            if let Err(e) = self.transport.write_response(response).await {
-                error!("Failed to send response: {}", e);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Process a JSON-RPC request and return a response (if needed)
-    #[instrument(skip(self))]
-    async fn process_request(&self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
-        // Notifications don't get responses
-        let request_id = request.id.clone();
-        let is_notification = request.is_notification();
-
-        // Validate request
-        if let Err(error) = request.validate() {
-            if !is_notification {
-                return Some(JsonRpcResponse::error(error, request_id));
-            } else {
-                // For notifications, we still log the error but don't respond
-                warn!("Invalid notification: {}", error.message);
-                return None;
-            }
-        }
-
-        // Look up method handler
-        let methods = self.methods.lock().await;
-        let handler_type = match methods.get(&request.method) {
-            Some(handler) => handler.clone(),
-            None => {
-                drop(methods); // Release lock early
-                if !is_notification {
-                    return Some(JsonRpcResponse::method_not_found(&request.method, request_id));
-                } else {
-                    warn!("Method not found for notification: {}", request.method);
-                    return None;
-                }
-            }
-        };
-        drop(methods); // Release lock
-
-        // Execute the method handler based on type
-        let result = match handler_type {
-            HandlerType::NonStreaming(handler) => handler(request.params).await,
-            HandlerType::Streaming(handler) => {
-                // Pass a clone of the notification sender to the streaming handler
-                let notifier = self.notification_tx.clone();
-                handler(request.params, notifier).await
-            }
-        };
-
-        match result {
-            Ok(result) => {
-                if !is_notification {
-                    Some(JsonRpcResponse::success(result, request_id))
-                } else {
-                    None
-                }
-            }
-            Err(error) => {
-                if !is_notification {
-                    Some(JsonRpcResponse::error(error, request_id))
-                } else {
-                    error!("Error in notification handler for {}: {}", request.method, error.message);
-                    None
-                }
-            }
-        }
     }
 
     /// Get the list of registered methods

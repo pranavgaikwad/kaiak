@@ -1,4 +1,4 @@
-//! Kaiak Migration Server
+//! Kaiak Server
 //!
 //! A standalone server integrating Goose AI agent for code migration workflows.
 //! Provides LSP-style JSON-RPC communication for IDE extensions.
@@ -8,7 +8,6 @@ use anyhow::Result;
 // Re-export commonly used types
 pub use models::session::SessionManager;
 
-// pub mod config; // REMOVED: Configuration logic moved to models/configuration.rs and logging.rs
 pub mod server;
 pub mod models;
 pub mod handlers;

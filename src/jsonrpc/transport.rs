@@ -155,32 +155,29 @@ impl Default for StdioTransport {
     }
 }
 
-/// Unix domain socket (IPC) transport
+/// Unix domain socket (IPC) transport for a single connection
 pub struct IpcTransport {
-    stream: tokio::net::UnixStream,
     reader: BufReader<tokio::net::unix::OwnedReadHalf>,
     writer: tokio::net::unix::OwnedWriteHalf,
 }
 
 impl IpcTransport {
-    /// Create a new IPC transport from a Unix socket path
+    /// Create a new IPC transport by connecting to an existing socket (client-side)
     pub async fn connect<P: AsRef<Path>>(path: P) -> Result<Self> {
         let stream = tokio::net::UnixStream::connect(path.as_ref()).await?;
         let (read_half, write_half) = stream.into_split();
 
         Ok(Self {
-            stream: tokio::net::UnixStream::connect(path).await?, // Keep for closing
             reader: BufReader::new(read_half),
             writer: write_half,
         })
     }
 
-    /// Create a new IPC transport from an existing Unix stream
+    /// Create a new IPC transport from an existing Unix stream (from accepted connection)
     pub fn from_stream(stream: tokio::net::UnixStream) -> Self {
         let (read_half, write_half) = stream.into_split();
 
         Self {
-            stream: tokio::net::UnixStream::pair().unwrap().0, // Placeholder for closing
             reader: BufReader::new(read_half),
             writer: write_half,
         }
@@ -271,6 +268,112 @@ impl Transport for IpcTransport {
     }
 }
 
+/// Unix domain socket server transport that listens for connections
+/// 
+/// This wraps a UnixListener and accepts connections one at a time.
+/// Each accepted connection is handled sequentially.
+pub struct IpcServerTransport {
+    listener: tokio::net::UnixListener,
+    socket_path: String,
+    current_connection: Option<IpcTransport>,
+}
+
+impl IpcServerTransport {
+    /// Bind to a Unix socket path and start listening
+    pub async fn bind<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path_ref = path.as_ref();
+        let socket_path = path_ref.to_string_lossy().to_string();
+        
+        // Remove existing socket file if it exists
+        if path_ref.exists() {
+            std::fs::remove_file(path_ref)
+                .map_err(|e| anyhow!("Failed to remove existing socket file: {}", e))?;
+        }
+        
+        let listener = tokio::net::UnixListener::bind(path_ref)
+            .map_err(|e| anyhow!("Failed to bind to socket {}: {}", socket_path, e))?;
+        
+        debug!("IPC server listening on: {}", socket_path);
+        
+        Ok(Self {
+            listener,
+            socket_path,
+            current_connection: None,
+        })
+    }
+    
+    /// Accept a new connection (blocks until a client connects)
+    async fn accept_connection(&mut self) -> Result<()> {
+        debug!("Waiting for client connection on {}", self.socket_path);
+        
+        let (stream, _addr) = self.listener.accept().await
+            .map_err(|e| anyhow!("Failed to accept connection: {}", e))?;
+        
+        debug!("Client connected to {}", self.socket_path);
+        self.current_connection = Some(IpcTransport::from_stream(stream));
+        
+        Ok(())
+    }
+    
+    /// Ensure we have an active connection, accepting one if needed
+    async fn ensure_connection(&mut self) -> Result<&mut IpcTransport> {
+        if self.current_connection.is_none() {
+            self.accept_connection().await?;
+        }
+        
+        Ok(self.current_connection.as_mut().unwrap())
+    }
+}
+
+#[async_trait]
+impl Transport for IpcServerTransport {
+    async fn read_request(&mut self) -> Result<JsonRpcRequest> {
+        loop {
+            let transport = self.ensure_connection().await?;
+            
+            match transport.read_request().await {
+                Ok(request) => return Ok(request),
+                Err(e) => {
+                    // Connection closed or error - drop this connection and wait for a new one
+                    debug!("Connection error (will accept new connection): {}", e);
+                    self.current_connection = None;
+                    // Continue loop to accept next connection
+                }
+            }
+        }
+    }
+
+    async fn write_response(&mut self, response: JsonRpcResponse) -> Result<()> {
+        let transport = self.current_connection.as_mut()
+            .ok_or_else(|| anyhow!("No active connection"))?;
+        transport.write_response(response).await
+    }
+
+    async fn write_notification(&mut self, notification: JsonRpcNotification) -> Result<()> {
+        let transport = self.current_connection.as_mut()
+            .ok_or_else(|| anyhow!("No active connection"))?;
+        transport.write_notification(notification).await
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        if let Some(ref mut transport) = self.current_connection {
+            transport.close().await?;
+        }
+        
+        // Clean up socket file
+        if Path::new(&self.socket_path).exists() {
+            std::fs::remove_file(&self.socket_path)?;
+        }
+        
+        debug!("IPC server transport closed: {}", self.socket_path);
+        Ok(())
+    }
+
+    fn description(&self) -> &'static str {
+        "JSON-RPC server over Unix domain socket (LSP-style)"
+    }
+}
+
 /// Transport configuration
 #[derive(Debug, Clone)]
 pub enum TransportConfig {
@@ -281,13 +384,33 @@ pub enum TransportConfig {
 }
 
 impl TransportConfig {
-    /// Create transport from configuration
+    /// Create a server-side transport from configuration
+    /// 
+    /// For Unix sockets, this binds and listens (server mode).
+    /// For stdio, this creates a standard input/output transport.
     pub async fn create_transport(&self) -> Result<Box<dyn Transport>> {
         match self {
             TransportConfig::Stdio => {
                 Ok(Box::new(StdioTransport::new()))
             }
             TransportConfig::UnixSocket { path } => {
+                // Server mode: bind and listen
+                let transport = IpcServerTransport::bind(path).await?;
+                Ok(Box::new(transport))
+            }
+        }
+    }
+    
+    /// Create a client-side transport from configuration
+    /// 
+    /// For Unix sockets, this connects to an existing server.
+    pub async fn create_client_transport(&self) -> Result<Box<dyn Transport>> {
+        match self {
+            TransportConfig::Stdio => {
+                Ok(Box::new(StdioTransport::new()))
+            }
+            TransportConfig::UnixSocket { path } => {
+                // Client mode: connect to existing server
                 let transport = IpcTransport::connect(path).await?;
                 Ok(Box::new(transport))
             }
@@ -364,7 +487,6 @@ pub mod lsp_format {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jsonrpc::protocol::JsonRpcRequest;
 
     #[test]
     fn test_lsp_format() {

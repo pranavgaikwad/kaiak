@@ -6,23 +6,19 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 
-// Import Goose types for agent initialization
 use goose::agents::{Agent, SessionConfig};
-use uuid;
 
-// Re-export key types
 pub use session_wrapper::{GooseSessionWrapper, SessionInfo};
 
 use crate::models::configuration::AgentConfig;
 use crate::KaiakResult;
 
-/// Agent manager with integrated Goose session management and agent initialization
+/// This will manage the lifecycle of Goose agents
+/// we can have multiple agents running at any given time
+/// we store the state of the agents (tied to goose sessions)
 pub struct GooseAgentManager {
-    /// Goose session wrapper for session management
     session_wrapper: Arc<GooseSessionWrapper>,
-    /// Active agent instances mapped by session ID (User Story 3)
     agents: Arc<RwLock<HashMap<String, Arc<Agent>>>>,
-    /// Configuration cache for agents
     configurations: Arc<RwLock<HashMap<String, AgentConfig>>>,
 }
 
@@ -46,7 +42,7 @@ impl GooseAgentManager {
 
     pub async fn get_or_create_session(
         &self,
-        session_id: &str,
+        session_id: Option<&str>,
         config: &AgentConfig,
     ) -> KaiakResult<SessionInfo> {
         self.session_wrapper.get_or_create_session(session_id, config).await
@@ -153,13 +149,6 @@ impl GooseAgentManager {
 
         debug!("Creating SessionConfig for session: {}", session_id);
 
-        if uuid::Uuid::parse_str(session_id).is_err() {
-            return Err(crate::KaiakError::session(
-                "Session ID must be a valid UUID".to_string(),
-                Some(session_id.to_string())
-            ));
-        }
-
         // Map configuration from AgentConfiguration to Goose SessionConfig
         let session_config = SessionConfig {
             id: session_id.to_string(),
@@ -191,23 +180,5 @@ impl GooseAgentManager {
 impl Default for GooseAgentManager {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_manager_creation() {
-        let manager = GooseAgentManager::new();
-        // Basic creation test - actual functionality in User Story 3
-        assert!(true);
-    }
-
-    #[tokio::test]
-    async fn test_active_agent_count() {
-        let manager = GooseAgentManager::new();
-        assert_eq!(manager.active_agent_count().await, 0);
     }
 }

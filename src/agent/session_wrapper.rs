@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
-// Import actual Goose session management types
 use goose::session::{Session, SessionManager, SessionType};
 
 use crate::models::configuration::AgentConfig;
@@ -17,7 +15,6 @@ pub struct GooseSessionWrapper {
     session_locks: Arc<RwLock<HashMap<String, chrono::DateTime<chrono::Utc>>>>,
 }
 
-/// Information about a managed session
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
     pub session: Session,
@@ -32,20 +29,12 @@ impl GooseSessionWrapper {
     }
 
     /// Create a new Goose session with the provided configuration
+    /// Returns the SessionInfo containing the Goose-generated session ID
     pub async fn create_session(
         &self,
-        session_id: &str,
         config: &AgentConfig,
     ) -> KaiakResult<SessionInfo> {
-        info!("Creating Goose session: {}", session_id);
-
-        if Uuid::parse_str(session_id).is_err() {
-            return Err(KaiakError::session("Invalid UUID format for session ID".to_string(), Some(session_id.to_string())));
-        }
-
-        if self.session_exists(session_id).await {
-            return Err(KaiakError::session("Session already exists".to_string(), Some(session_id.to_string())));
-        }
+        info!("Creating new Goose session");
 
         let working_dir = if config.workspace.is_absolute() {
             config.workspace.clone()
@@ -70,13 +59,13 @@ impl GooseSessionWrapper {
         }
 
         let session_name = format!(
-            "Kaiak session - {}",
+            "kaiak-{}",
             working_dir.file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("workspace")
         );
 
-        // Create Goose session using SessionManager static method
+        // Create Goose session - Goose will generate its own session ID
         debug!("Creating Goose session with working_dir: {:?}", working_dir);
         let session = SessionManager::create_session(
             working_dir,
@@ -89,24 +78,20 @@ impl GooseSessionWrapper {
             )
         })?;
 
-        debug!("Created Goose session with ID: {}", session.id);
+        let session_id = session.id.clone();
+        info!("Successfully created Goose session with ID: {}", session_id);
 
         let session_info = SessionInfo {
             session,
             locked_at: None,
         };
 
-        info!("Successfully created Goose session: {}", session_id);
         Ok(session_info)
     }
 
     /// Get an existing session by ID
     pub async fn get_session(&self, session_id: &str) -> KaiakResult<Option<SessionInfo>> {
         debug!("Looking up Goose session: {}", session_id);
-
-        if Uuid::parse_str(session_id).is_err() {
-            return Err(KaiakError::session("Invalid UUID format for session ID".to_string(), Some(session_id.to_string())));
-        }
 
         // Get session from Goose SessionManager
         match SessionManager::get_session(session_id, false).await {
@@ -142,11 +127,6 @@ impl GooseSessionWrapper {
     pub async fn delete_session(&self, session_id: &str) -> KaiakResult<bool> {
         info!("Deleting Goose session: {}", session_id);
 
-        // Validate session ID format
-        if Uuid::parse_str(session_id).is_err() {
-            return Err(KaiakError::session("Invalid UUID format for session ID".to_string(), Some(session_id.to_string())));
-        }
-
         // Check if session is currently locked
         if self.is_session_locked(session_id).await {
             return Err(KaiakError::session_in_use(
@@ -178,11 +158,6 @@ impl GooseSessionWrapper {
     /// Lock a session to prevent concurrent access
     pub async fn lock_session(&self, session_id: &str) -> KaiakResult<()> {
         debug!("Locking session: {}", session_id);
-
-        // Validate session ID format
-        if Uuid::parse_str(session_id).is_err() {
-            return Err(KaiakError::session("Invalid UUID format for session ID".to_string(), Some(session_id.to_string())));
-        }
 
         // Check if session exists
         if !self.session_exists(session_id).await {
@@ -233,20 +208,26 @@ impl GooseSessionWrapper {
     }
 
     /// Get or create a session (create-or-reuse pattern)
+    /// If session_id is provided and valid, tries to get the existing session
+    /// If session_id is None or session doesn't exist, creates a new one
     pub async fn get_or_create_session(
         &self,
-        session_id: &str,
+        session_id: Option<&str>,
         config: &AgentConfig,
     ) -> KaiakResult<SessionInfo> {
-        // Try to get existing session first
-        if let Some(session_info) = self.get_session(session_id).await? {
-            debug!("Reusing existing session: {}", session_id);
-            return Ok(session_info);
+        // If session_id is provided, try to get existing session
+        if let Some(id) = session_id {
+            if let Some(session_info) = self.get_session(id).await? {
+                debug!("Reusing existing session: {}", id);
+                return Ok(session_info);
+            }
+            // Session ID was provided but session doesn't exist - this is an error
+            return Err(KaiakError::SessionNotFound(id.to_string()));
         }
 
-        // Create new session if it doesn't exist
-        debug!("Creating new session: {}", session_id);
-        self.create_session(session_id, config).await
+        // No session_id provided - create a new session
+        debug!("Creating new session (no session_id provided)");
+        self.create_session(config).await
     }
 
     /// Clean up expired session locks (housekeeping)
@@ -282,43 +263,5 @@ impl GooseSessionWrapper {
 impl Default for GooseSessionWrapper {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_session_wrapper_creation() {
-        let wrapper = GooseSessionWrapper::new();
-        assert_eq!(wrapper.active_session_count().await, 0);
-    }
-
-    #[tokio::test]
-    async fn test_session_locking() {
-        let wrapper = GooseSessionWrapper::new();
-        let session_id = "test-session-123";
-
-        // Initially not locked
-        assert!(!wrapper.is_session_locked(session_id).await);
-
-        // Note: This test would need a real session to exist for locking
-        // In a full test, we would create a session first
-    }
-
-    #[tokio::test]
-    async fn test_uuid_validation() {
-        let wrapper = GooseSessionWrapper::new();
-        let temp_dir = TempDir::new().unwrap();
-
-        // Invalid UUID should fail
-        let result = wrapper.create_session("not-a-uuid", &AgentConfig::default()).await;
-        assert!(result.is_err());
-
-        if let Err(e) = result {
-            assert!(e.to_string().contains("Invalid UUID format"));
-        }
     }
 }

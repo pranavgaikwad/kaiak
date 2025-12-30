@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 use validator::Validate;
 
 use crate::agent::GooseAgentManager;
@@ -13,7 +12,6 @@ use crate::KaiakResult;
 pub struct DeleteSessionRequest {
     /// Session identifier to delete
     #[validate(length(min = 1, message = "Session ID cannot be empty"))]
-    #[validate(custom(function = "validate_uuid_format"))]
     pub session_id: String,
     /// Cleanup options for session deletion
     #[validate(nested)]
@@ -209,11 +207,6 @@ impl DeleteSessionHandler {
             return Err(crate::KaiakError::session("Session ID cannot be empty".to_string(), Some(request.session_id.clone())));
         }
 
-        // Validate UUID format for session ID
-        if Uuid::parse_str(&request.session_id).is_err() {
-            return Err(crate::KaiakError::session("Session ID must be a valid UUID".to_string(), Some(request.session_id.clone())));
-        }
-
         // Validate cleanup options
         if let Some(ref options) = request.cleanup_options {
             if let Some(grace_period) = options.grace_period {
@@ -350,12 +343,4 @@ impl DeleteSessionHandler {
 
         operations.retain(|_session_id, started_at| *started_at > cutoff);
     }
-}
-
-/// Custom validation function for UUID format
-fn validate_uuid_format(session_id: &str) -> Result<(), validator::ValidationError> {
-    if Uuid::parse_str(session_id).is_err() {
-        return Err(validator::ValidationError::new("invalid_uuid_format"));
-    }
-    Ok(())
 }

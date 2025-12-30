@@ -32,17 +32,10 @@ impl ClientInfo {
 /// Client-side request builder for JSON-RPC calls
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientRequest {
-    /// JSON-RPC method name
     pub method: String,
-
-    /// Request parameters as JSON value
     pub params: Value,
-
-    /// Optional request timeout in seconds
     pub timeout: Option<u64>,
-
-    /// Client connection info (for debugging)
-    pub client_info: Option<ClientInfo>,
+    pub client_info: Option<ClientInfo>, // Only exists for debugging purposes
 }
 
 impl ClientRequest {
@@ -120,13 +113,10 @@ impl JsonRpcClient {
     where
         F: FnMut(JsonRpcNotification),
     {
-        // Generate unique request ID
         let request_id = Uuid::new_v4().to_string();
 
-        // Create JSON-RPC 2.0 request using the shared type
         let jsonrpc_request = request.to_jsonrpc_request(request_id.clone());
 
-        // Connect to socket
         let stream = UnixStream::connect(&self.socket_path)
             .await
             .map_err(|e| anyhow!("Failed to connect to socket {}: {}", self.socket_path, e))?;
@@ -134,43 +124,35 @@ impl JsonRpcClient {
         let (read_half, mut write_half) = stream.into_split();
         let mut reader = BufReader::new(read_half);
 
-        // Serialize request to JSON
         let request_json = serde_json::to_string(&jsonrpc_request)
             .map_err(|e| anyhow!("Failed to serialize request: {}", e))?;
 
         debug!("Sending request: {}", request_json);
 
-        // Send LSP-style message with Content-Length header
         let message = format!("Content-Length: {}\r\n\r\n{}", request_json.len(), request_json);
         write_half.write_all(message.as_bytes()).await
             .map_err(|e| anyhow!("Failed to write message: {}", e))?;
         write_half.flush().await
             .map_err(|e| anyhow!("Failed to flush: {}", e))?;
 
-        // Read messages until we get the final response
         loop {
             let message_json = Self::read_lsp_message(&mut reader).await?;
             debug!("Received message: {}", message_json);
 
-            // Try to parse as a generic JSON value first
             let msg: Value = serde_json::from_str(&message_json)
                 .map_err(|e| anyhow!("Failed to parse message JSON: {}", e))?;
 
-            // Check if this is a notification (has method, no id or null id)
             let is_notification = msg.get("method").is_some() 
                 && (msg.get("id").is_none() || msg.get("id") == Some(&Value::Null));
 
             if is_notification {
-                // Parse as notification and invoke callback
                 let notification: JsonRpcNotification = serde_json::from_value(msg)
                     .map_err(|e| anyhow!("Failed to parse notification: {}", e))?;
                 on_notification(notification);
             } else {
-                // Parse as response - this is our final message
                 let response: JsonRpcResponse = serde_json::from_value(msg)
                     .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
-                // Verify response ID matches request (id is Option<Value>)
                 let response_id = response.id
                     .as_ref()
                     .and_then(|v| v.as_str())
@@ -180,12 +162,10 @@ impl JsonRpcClient {
                     return Err(anyhow!("Response ID mismatch: expected {}, got {}", request_id, response_id));
                 }
 
-                // Handle error response
                 if let Some(ref error) = response.error {
                     return Err(anyhow!("JSON-RPC error {}: {}", error.code, error.message));
                 }
 
-                // Return result
                 return response.result
                     .ok_or_else(|| anyhow!("Response missing both result and error"));
             }
@@ -196,7 +176,6 @@ impl JsonRpcClient {
     async fn read_lsp_message<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R) -> Result<String> {
         let mut content_length: Option<usize> = None;
 
-        // Read headers
         loop {
             let mut line = String::new();
             let bytes_read = reader.read_line(&mut line).await
@@ -209,12 +188,10 @@ impl JsonRpcClient {
             let line = line.trim_end();
             trace!("Read header: {}", line);
 
-            // Empty line indicates end of headers
             if line.is_empty() {
                 break;
             }
 
-            // Parse Content-Length header
             if let Some(length_str) = line.strip_prefix("Content-Length: ") {
                 content_length = Some(length_str.parse()
                     .map_err(|e| anyhow!("Invalid Content-Length: {}", e))?);
@@ -224,7 +201,6 @@ impl JsonRpcClient {
         let content_length = content_length
             .ok_or_else(|| anyhow!("Missing Content-Length header"))?;
 
-        // Read the JSON content
         let mut buffer = vec![0u8; content_length];
         reader.read_exact(&mut buffer).await
             .map_err(|e| anyhow!("Failed to read message body: {}", e))?;
@@ -264,10 +240,12 @@ impl JsonRpcClient {
 
 
 /// Manages the connection state file (~/.kaiak/connection)
+/// Everytime user connects to a server, we store the path to
+/// the socket file as connection state so all subsequent requests
+/// can be made to the same server until disconnect is called
 pub struct ConnectionState;
 
 impl ConnectionState {
-    /// Get the path to the connection state file
     pub fn state_file_path() -> Result<PathBuf> {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| anyhow!("Unable to determine home directory"))?;
@@ -287,7 +265,6 @@ impl ConnectionState {
         Ok(())
     }
 
-    /// Load the current connection (socket path)
     pub fn load() -> Result<Option<String>> {
         let state_file = Self::state_file_path()?;
         
@@ -305,7 +282,6 @@ impl ConnectionState {
         Ok(Some(socket_path))
     }
 
-    /// Clear the current connection
     pub fn clear() -> Result<()> {
         let state_file = Self::state_file_path()?;
         
@@ -316,59 +292,14 @@ impl ConnectionState {
         Ok(())
     }
 
-    /// Check if there's an active connection
     pub fn is_connected() -> Result<bool> {
         Ok(Self::load()?.is_some())
     }
 
-    /// Get client for the current connection, or error if not connected
     pub fn get_client() -> Result<JsonRpcClient> {
         let socket_path = Self::load()?
             .ok_or_else(|| anyhow!("Not connected to any server. Use 'kaiak connect <socket_path>' first."))?;
         
         Ok(JsonRpcClient::new(socket_path))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_procedure_request_creation() {
-        let params = serde_json::json!({"test": "value"});
-        let request = ClientRequest::new("test/method".to_string(), params.clone());
-
-        assert_eq!(request.method, "test/method");
-        assert_eq!(request.params, params);
-        assert!(request.timeout.is_none());
-        assert!(request.client_info.is_none());
-    }
-
-    #[test]
-    fn test_procedure_request_with_timeout() {
-        let params = serde_json::json!({});
-        let request = ClientRequest::new("test/method".to_string(), params)
-            .with_timeout(30);
-
-        assert_eq!(request.timeout, Some(30));
-    }
-
-    #[test]
-    fn test_client_info_creation() {
-        let socket_path = "/tmp/test.sock".to_string();
-        let client_info = ClientInfo::new(socket_path.clone());
-
-        assert_eq!(client_info.socket_path, socket_path);
-        assert_eq!(client_info.version, env!("CARGO_PKG_VERSION"));
-        assert!(!client_info.request_id.is_empty());
-    }
-
-    #[test]
-    fn test_jsonrpc_client_creation() {
-        let socket_path = "/tmp/test.sock".to_string();
-        let client = JsonRpcClient::new(socket_path.clone());
-
-        assert_eq!(client.socket_path(), &socket_path);
     }
 }

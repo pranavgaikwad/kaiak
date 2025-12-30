@@ -7,8 +7,6 @@
 
 pub mod transport;
 
-// Re-export key client types
 pub use transport::{JsonRpcClient, ClientInfo, ClientRequest, ConnectionState};
 
-// Re-export JSON-RPC types from the shared module for convenience
 pub use crate::jsonrpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, JsonRpcError};
