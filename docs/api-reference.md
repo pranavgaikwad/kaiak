@@ -7,7 +7,7 @@
 
 ## Overview
 
-Kaiak provides a simplified JSON-RPC API for agent operations. All communication follows LSP message framing and supports real-time streaming notifications.
+Kaiak provides a simplified JSON-RPC API for agent operations. All communication follows LSP message framing and supports real-time concurrent streaming notifications. The server supports bidirectional notifications - it can both send and receive JSON-RPC notifications.
 
 ## Transport Layer
 
@@ -39,7 +39,7 @@ Kaiak exposes two methods:
 
 ## 1. kaiak/generate_fix
 
-Process migration incidents with the Goose AI agent. Sends progress notifications during execution.
+Process migration incidents with the Goose AI agent. Sends progress notifications **concurrently** during execution using `tokio::select!` for real-time streaming.
 
 ### Request
 
@@ -86,7 +86,7 @@ Process migration incidents with the Goose AI agent. Sends progress notification
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `session_id` | string | Yes | Client-generated UUID for the session |
+| `session_id` | string | **No** | Session identifier. If omitted, a new session is created and the Goose-generated ID is returned |
 | `incidents` | array | Yes | Migration incidents to process (1-1000 items) |
 | `migration_context` | object | No | Additional context for the migration |
 | `agent_config` | object | Yes | Agent configuration |
@@ -121,12 +121,14 @@ Process migration incidents with the Goose AI agent. Sends progress notification
   "jsonrpc": "2.0",
   "result": {
     "request_id": "req-550e8400-e29b-41d4-a716-446655440001",
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "session_id": "goose-generated-or-provided-session-id",
     "created_at": "2025-12-25T10:35:45Z"
   },
   "id": 1
 }
 ```
+
+**Note:** The `session_id` in the response is the actual session ID used. If you didn't provide one, this is the Goose-generated ID that you should use for subsequent requests (e.g., `delete_session`) or to continue an existing session.
 
 ### Response (Error)
 
@@ -135,7 +137,7 @@ Process migration incidents with the Goose AI agent. Sends progress notification
   "jsonrpc": "2.0",
   "error": {
     "code": -32602,
-    "message": "Invalid params: Field 'session_id': Session ID cannot be empty",
+    "message": "Invalid params: Must provide 1-1000 incidents",
     "data": null
   },
   "id": 1
@@ -201,7 +203,9 @@ Delete an agent session and clean up associated resources.
 
 ## Streaming Notifications
 
-During `kaiak/generate_fix` processing, the server sends real-time notifications. All notifications have no `id` field (per JSON-RPC 2.0 specification for notifications).
+During `kaiak/generate_fix` processing, the server sends real-time notifications **concurrently** as they are generated (not buffered). All notifications have no `id` field (per JSON-RPC 2.0 specification for notifications).
+
+The server uses `tokio::select!` to stream notifications immediately while request processing continues, ensuring clients receive progress updates in real-time.
 
 ### Progress Notification
 
@@ -352,11 +356,10 @@ kaiak serve --socket /tmp/kaiak.sock --config-json '{
 kaiak connect /tmp/kaiak.sock
 ```
 
-### 3. Generate Fixes
+### 3. Generate Fixes (session_id is optional)
 
 ```bash
 kaiak generate-fix --params-json '{
-  "session_id": "my-session-123",
   "incidents": [{
     "id": "dep-1",
     "rule_id": "deprecated-api",
@@ -369,7 +372,7 @@ kaiak generate-fix --params-json '{
 }'
 ```
 
-**Output (streaming notifications):**
+**Output (streaming notifications arrive in real-time):**
 ```
 [kaiak/generateFix/progress] stage=started progress=0%
 [kaiak/generateFix/progress] stage=analyzing progress=25%
@@ -379,15 +382,15 @@ kaiak generate-fix --params-json '{
 --- Final Result ---
 {
   "request_id": "req-abc123",
-  "session_id": "my-session-123",
+  "session_id": "goose-generated-session-id",
   "created_at": "2025-12-29T10:00:00Z"
 }
 ```
 
-### 4. Clean Up
+### 4. Clean Up (use session_id from response)
 
 ```bash
-kaiak delete-session my-session-123
+kaiak delete-session goose-generated-session-id
 kaiak disconnect
 ```
 
@@ -396,10 +399,12 @@ kaiak disconnect
 ## Integration Notes
 
 - Use LSP-compatible client libraries for transport handling
-- Handle streaming notifications asynchronously  
+- Handle streaming notifications asynchronously (they arrive concurrently during processing)
 - Implement error recovery for network interruptions
-- Generate UUIDs client-side for session IDs
+- Session IDs are **optional** - server creates new sessions if not provided
+- Use the `session_id` from responses to continue sessions or clean up
 - Only one client can use a session at a time
+- Server can receive notifications from clients (messages without `id` field)
 
 ---
 
@@ -412,8 +417,8 @@ use kaiak::client::{JsonRpcClient, ClientRequest, JsonRpcNotification};
 async fn main() -> anyhow::Result<()> {
     let client = JsonRpcClient::new("/tmp/kaiak.sock".to_string());
 
+    // session_id is optional - omit to have server create a new session
     let params = serde_json::json!({
-        "session_id": "my-session",
         "incidents": [{"id": "1", "rule_id": "test", "message": "Test"}],
         "agent_config": {
             "workspace": {"working_dir": "/tmp/project"},
@@ -423,12 +428,16 @@ async fn main() -> anyhow::Result<()> {
 
     let request = ClientRequest::new("kaiak/generate_fix".to_string(), params);
 
+    // Notifications arrive in real-time during processing
     let result = client.call(request, |notification: JsonRpcNotification| {
         if let Some(params) = &notification.params {
             println!("Progress: {}", params);
         }
     }).await?;
 
+    // Extract session_id from response for later use (e.g., delete_session)
+    let session_id = result["session_id"].as_str().unwrap();
+    println!("Session ID: {}", session_id);
     println!("Result: {}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

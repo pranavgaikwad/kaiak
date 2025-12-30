@@ -67,29 +67,32 @@ chmod +x .git/hooks/pre-commit
 │  • IDE Extensions (stdio)  • CLI Client (Unix socket)       │
 └─────────────────┬───────────────────────────────────────────┘
                   │ JSON-RPC 2.0 over LSP transport
+                  │ (bidirectional notifications)
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                 Transport Layer                              │
-│  • StdioTransport  • IpcTransport (Unix sockets)            │
+│  • StdioTransport  • IpcTransport  • IpcServerTransport     │
 └─────────────────┬───────────────────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              JSON-RPC Server                                 │
-│  • Method routing  • Streaming notifications  • Error codes │
+│  • Method routing  • Concurrent streaming (tokio::select!)  │
+│  • Bidirectional notifications  • Error codes               │
 └─────────────────┬───────────────────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                Handler Layer                                 │
-│  • GenerateFixHandler (streaming)                           │
+│  • GenerateFixHandler (streaming, optional session_id)      │
 │  • DeleteSessionHandler                                     │
 └─────────────┬───────────────────────────────────────────────┘
               │
               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Agent Manager                                   │
-│  • Session creation  • Agent lifecycle  • Event streaming   │
+│  • Session creation (optional IDs)  • Agent lifecycle       │
+│  • Event streaming  • Goose SessionManager integration      │
 └─────────────────┬───────────────────────────────────────────┘
                   │
                   ▼
@@ -103,20 +106,21 @@ chmod +x .git/hooks/pre-commit
 
 #### 1. JSON-RPC Module (`src/jsonrpc/`)
 
-- **`protocol.rs`**: Core JSON-RPC 2.0 types (Request, Response, Notification, Error)
-- **`transport.rs`**: Transport trait and implementations (stdio, Unix sockets)
-- **`server.rs`**: JSON-RPC server with method registration and streaming support
+- **`protocol.rs`**: Core JSON-RPC 2.0 types (Request, Response, Notification, Error) - shared between client/server
+- **`transport.rs`**: Transport trait and implementations (StdioTransport, IpcTransport, IpcServerTransport)
+- **`server.rs`**: JSON-RPC server with concurrent streaming using `tokio::select!`
 - **`methods.rs`**: Method constants and registration helpers
 - **`core.rs`**: Kaiak-specific request/response wrappers
 
 #### 2. Handlers Module (`src/handlers/`)
 
-- **`generate_fix.rs`**: Core fix generation with streaming notifications
+- **`generate_fix.rs`**: Core fix generation with concurrent streaming notifications (optional session_id)
 - **`delete_session.rs`**: Session cleanup and resource management
 
 #### 3. Agent Module (`src/agent/`)
 
 - **`mod.rs`**: GooseAgentManager for agent lifecycle and session coordination
+- **`session_wrapper.rs`**: Session management wrapper with optional session ID support (Goose generates if not provided)
 
 #### 4. Models Module (`src/models/`)
 
@@ -125,8 +129,8 @@ chmod +x .git/hooks/pre-commit
 
 #### 5. Client Module (`src/client/`)
 
-- **`transport.rs`**: JSON-RPC client for Unix socket communication
-- **`mod.rs`**: Client exports (JsonRpcClient, ConnectionState)
+- **`transport.rs`**: JSON-RPC client with unified `call()` method for requests and notification handling
+- **`mod.rs`**: Client exports (JsonRpcClient, ConnectionState) + re-exports shared JSON-RPC types
 
 #### 6. Server Module (`src/server/`)
 
@@ -410,24 +414,34 @@ pub async fn register_kaiak_methods(
         },
     ).await?;
     
-    // For streaming methods (sends notifications during execution)
+    // For streaming methods (sends concurrent notifications during execution)
+    // Notifications are sent in real-time using tokio::select!, not buffered
     server.register_streaming_method(
         NEW_FEATURE.to_string(),
         move |params, notifier| {
             async move {
                 // Use notifier.send() to send progress notifications
+                // These are sent concurrently while the handler executes
                 notifier.send(JsonRpcNotification::new(
                     "kaiak/newFeature/progress",
                     Some(serde_json::json!({"stage": "started"})),
                 ))?;
                 
                 // Handle request...
+                // More notifications can be sent at any time
+                notifier.send(JsonRpcNotification::new(
+                    "kaiak/newFeature/progress",
+                    Some(serde_json::json!({"stage": "processing", "progress": 50})),
+                ))?;
+                
                 Ok(serde_json::to_value(response)?)
             }
         },
     ).await?;
 }
 ```
+
+**Note**: The server can also receive notifications from clients. When a JSON-RPC message without an `id` field is received, it's processed as a notification - the handler runs but no response is sent.
 
 #### Step 5: Update Configuration (if needed)
 
@@ -507,18 +521,6 @@ pub async fn process_request(request: &Request) -> KaiakResult<Response> {
 }
 ```
 
-### Debug Configuration
-
-```bash
-# Environment variables for debugging
-export RUST_LOG="kaiak=debug,tower_lsp=info"
-export KAIAK_TRACE_RPC=true
-export KAIAK_PROFILE=true
-
-# Run with debugging enabled
-cargo run -- serve --stdio
-```
-
 ### Development Tools
 
 #### Using rust-analyzer
@@ -545,138 +547,6 @@ rust-gdb target/debug/kaiak
 rust-lldb target/debug/kaiak
 ```
 
-## Performance Optimization
-
-### Profiling
-
-```bash
-# Install profiling tools
-cargo install flamegraph
-
-# Generate flame graph
-cargo flamegraph --bin kaiak -- serve --stdio
-
-# Benchmark with criterion
-cargo bench
-```
-
-### Memory Management
-
-#### Efficient Data Structures
-
-```rust
-// Use appropriate data structures
-use std::collections::HashMap;
-use lru::LruCache;
-
-// LRU cache for frequently accessed data
-type SessionCache = LruCache<String, Arc<Session>>;
-
-// Efficient string handling
-use std::sync::Arc;
-type SharedString = Arc<str>;
-```
-
-#### Async Performance
-
-```rust
-// Use buffered channels for high-throughput scenarios
-use tokio::sync::mpsc;
-
-let (tx, mut rx) = mpsc::channel(1000);  // Buffered channel
-
-// Batch operations when possible
-let batch_size = 100;
-let mut batch = Vec::with_capacity(batch_size);
-
-while let Some(item) = rx.recv().await {
-    batch.push(item);
-
-    if batch.len() >= batch_size {
-        process_batch(batch.drain(..).collect()).await;
-    }
-}
-```
-
-### Monitoring
-
-```rust
-// Add metrics to critical paths
-use std::time::{Duration, Instant};
-
-async fn critical_operation() -> KaiakResult<()> {
-    let start = Instant::now();
-
-    // Perform operation
-    let result = do_work().await;
-
-    let duration = start.elapsed();
-    if duration > Duration::from_millis(100) {
-        warn!("Slow operation detected: {:?}", duration);
-    }
-
-    result
-}
-```
-
-## Security Considerations
-
-### Input Validation
-
-```rust
-use crate::config::security::SecurityConfig;
-
-impl SecurityConfig {
-    pub fn validate_file_path(&self, path: &str, workspace: &str) -> KaiakResult<String> {
-        // Prevent directory traversal
-        let normalized = path.replace("..", "");
-
-        // Ensure within workspace
-        let full_path = Path::new(workspace).join(&normalized);
-        let canonical = full_path.canonicalize()
-            .map_err(|e| KaiakError::invalid_workspace_path(format!("Invalid path: {}", e)))?;
-
-        if !canonical.starts_with(workspace) {
-            return Err(KaiakError::invalid_workspace_path("Path outside workspace"));
-        }
-
-        Ok(normalized)
-    }
-}
-```
-
-### Safe Async Operations
-
-```rust
-use tokio::time::{timeout, Duration};
-
-// Always use timeouts for external operations
-async fn safe_ai_request(request: AiRequest) -> KaiakResult<AiResponse> {
-    let response = timeout(
-        Duration::from_secs(300),  // 5-minute timeout
-        make_ai_request(request)
-    ).await
-    .map_err(|_| KaiakError::timeout("AI request timed out"))?;
-
-    response
-}
-```
-
-### Resource Limits
-
-```rust
-// Enforce resource limits
-const MAX_CONCURRENT_REQUESTS: usize = 10;
-const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;  // 10MB
-
-async fn validate_request_limits(&self) -> KaiakResult<()> {
-    if self.active_requests.len() >= MAX_CONCURRENT_REQUESTS {
-        return Err(KaiakError::resource_exhausted("Too many concurrent requests"));
-    }
-
-    Ok(())
-}
-```
 
 ## Contributing Guidelines
 
