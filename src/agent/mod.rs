@@ -64,7 +64,7 @@ impl GooseAgentManager {
         self.session_wrapper.unlock_session(session_id).await
     }
 
-    pub async fn create_agent(&self, session_id: &str, config: &AgentConfig) -> KaiakResult<Arc<Agent>> {
+    pub async fn create_agent(&self, session_id: &str, config: &AgentConfig) -> KaiakResult<(Arc<Agent>, SessionConfig)> {
         use tracing::{info, debug};
 
         info!("Creating new Goose agent for session: {}", session_id);
@@ -86,7 +86,7 @@ impl GooseAgentManager {
         }
 
         info!("Successfully created and configured Goose agent for session: {}", session_id);
-        Ok(agent_arc)
+        Ok((agent_arc, session_config))
     }
 
     pub async fn get_agent(&self, session_id: &str) -> Option<Arc<Agent>> {

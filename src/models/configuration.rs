@@ -304,6 +304,25 @@ impl ConfigurationHierarchy {
 }
 
 impl ServerConfig {
+    /// Load server configuration from the default user config path, 
+    /// falling back to defaults if the file doesn't exist
+    pub fn load() -> Result<Self> {
+        let config_path = ConfigurationHierarchy::default_user_config_path()?;
+        
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            let config: ServerConfig = toml::from_str(&content)?;
+            Ok(config)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    /// Get the default config path (delegates to ConfigurationHierarchy)
+    pub fn config_path() -> Result<PathBuf> {
+        ConfigurationHierarchy::default_user_config_path()
+    }
+
     /// Validate the complete configuration
     pub fn validate(&self) -> Result<()> {
         // Validate nested structures using validator trait

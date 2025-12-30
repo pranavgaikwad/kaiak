@@ -4,6 +4,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
+use goose::conversation::message::Message;
+use goose::agents::AgentEvent;
 
 use crate::models::{configuration::AgentConfig, incidents::MigrationIncident};
 use crate::agent::GooseAgentManager;
@@ -179,7 +181,6 @@ impl GenerateFixHandler {
                 debug!("Session ready for processing: {} (workspace: {:?})",
                        request.session_id,
                        request.agent_config.workspace);
-                session_info
             }
             Err(e) => {
                 error!("Failed to get or create session {}: {}", request.session_id, e);
@@ -190,8 +191,53 @@ impl GenerateFixHandler {
                 return Err(e);
             }
         };
-        let agent = self.agent_manager.create_agent(&request.session_id, &request.agent_config).await?;
+        let (agent, session_config) = self.agent_manager.create_agent(&request.session_id, &request.agent_config).await?;
 
+
+        let incident_messages: Vec<String> = request.incidents.iter().map(|i| i.message.clone()).collect();
+        let prompt = format!(
+            "Solve these migration issues in this application:{}{}",
+            if incident_messages.is_empty() { " (no incidents provided)" } else { "" },
+            if incident_messages.len() == 1 {
+                format!(" {}", incident_messages[0])
+            } else {
+                incident_messages
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, msg)| format!("\n  {}. {}", idx + 1, msg))
+                    .collect::<String>()
+            }
+        );
+
+        let message = Message::user().with_text(&prompt);
+
+        let mut stream = match agent.reply(message, session_config, None).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                error!("Failed to reply to message: {}", e);
+                return Err(crate::KaiakError::agent(format!("Failed to reply to message: {}", e), None));
+            }
+        };
+
+        while let Some(event) = futures::StreamExt::next(&mut stream).await {
+            match event {
+                Ok(AgentEvent::Message(message)) => {
+                    self.send_progress(notifier, &request.session_id, "Generating fix", 10, Some(serde_json::json!(message)));
+                },
+                Ok(AgentEvent::HistoryReplaced(history)) => {
+                    println!("History replaced: {:?}", history);
+                },
+                Ok(AgentEvent::McpNotification((req_id, notif))) => {
+                    println!("Mcp notification: {:?}", notif);
+                },
+                Ok(AgentEvent::ModelChange { model, mode }) => {
+                    println!("Model change: {:?}", model);
+                },
+                Err(e) => {
+                    error!("Error getting stream event: {:?}", e);
+                }
+            }
+        }
 
         if let Err(unlock_err) = self.agent_manager.unlock_session(&request.session_id).await {
             warn!("Failed to unlock session after preparation: {}", unlock_err);

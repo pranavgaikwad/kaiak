@@ -55,10 +55,6 @@ pub async fn start_server(
             config_copy.init_config.transport = "socket".to_string();
             config_copy.init_config.socket_path = Some(path.clone());
         },
-        JsonRpcTransportConfig::Http { .. } => {
-            // HTTP transport not supported yet
-            anyhow::bail!("HTTP transport not implemented yet");
-        },
     }
     let server_config = Arc::new(config_copy);
 

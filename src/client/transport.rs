@@ -3,10 +3,13 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::path::{Path, PathBuf};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
+use tracing::{debug, trace};
 use uuid::Uuid;
+
+use crate::jsonrpc::{JsonRpcRequest, JsonRpcResponse, JsonRpcError, JsonRpcNotification};
 
 /// Client information for debugging and tracing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +29,7 @@ impl ClientInfo {
     }
 }
 
-/// JSON-RPC request wrapper for client-side calls
+/// Client-side request builder for JSON-RPC calls
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientRequest {
     /// JSON-RPC method name
@@ -61,38 +64,20 @@ impl ClientRequest {
         self.client_info = Some(client_info);
         self
     }
-}
 
-/// JSON-RPC 2.0 request structure
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcRequest {
-    jsonrpc: String,
-    method: String,
-    params: Value,
-    id: String,
-}
-
-/// JSON-RPC 2.0 response structure
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcResponse {
-    jsonrpc: String,
-    id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-}
-
-/// JSON-RPC 2.0 error structure
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcError {
-    code: i32,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<Value>,
+    /// Convert to a JsonRpcRequest with the given ID
+    fn to_jsonrpc_request(&self, id: String) -> JsonRpcRequest {
+        JsonRpcRequest::new(
+            self.method.clone(),
+            Some(self.params.clone()),
+            Some(Value::String(id)),
+        )
+    }
 }
 
 /// JSON-RPC client for Unix socket communication
+/// 
+/// Uses LSP-style Content-Length framing to match the server protocol.
 pub struct JsonRpcClient {
     socket_path: String,
 }
@@ -118,100 +103,230 @@ impl JsonRpcClient {
         }
     }
 
-    /// Execute a JSON-RPC procedure call
-    pub async fn call(&self, request: ClientRequest) -> Result<Value> {
+    /// Execute a JSON-RPC procedure call using LSP-style framing
+    /// 
+    /// Reads all messages from the server until it receives the final response.
+    /// Notifications are passed to the provided callback.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// // With notification handling
+    /// client.call(request, |n| println!("Notification: {:?}", n)).await?;
+    /// 
+    /// // Without notification handling  
+    /// client.call(request, |_| {}).await?;
+    /// ```
+    pub async fn call<F>(&self, request: ClientRequest, mut on_notification: F) -> Result<Value>
+    where
+        F: FnMut(JsonRpcNotification),
+    {
         // Generate unique request ID
         let request_id = Uuid::new_v4().to_string();
 
-        // Create JSON-RPC 2.0 request
-        let jsonrpc_request = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: request.method.clone(),
-            params: request.params,
-            id: request_id.clone(),
-        };
+        // Create JSON-RPC 2.0 request using the shared type
+        let jsonrpc_request = request.to_jsonrpc_request(request_id.clone());
 
         // Connect to socket
-        let mut stream = UnixStream::connect(&self.socket_path)
+        let stream = UnixStream::connect(&self.socket_path)
             .await
             .map_err(|e| anyhow!("Failed to connect to socket {}: {}", self.socket_path, e))?;
+
+        let (read_half, mut write_half) = stream.into_split();
+        let mut reader = BufReader::new(read_half);
 
         // Serialize request to JSON
         let request_json = serde_json::to_string(&jsonrpc_request)
             .map_err(|e| anyhow!("Failed to serialize request: {}", e))?;
 
-        // Send length-prefixed message
-        let message_bytes = request_json.as_bytes();
-        let length = message_bytes.len() as u32;
+        debug!("Sending request: {}", request_json);
 
-        stream.write_all(&length.to_be_bytes()).await
-            .map_err(|e| anyhow!("Failed to write message length: {}", e))?;
-
-        stream.write_all(message_bytes).await
+        // Send LSP-style message with Content-Length header
+        let message = format!("Content-Length: {}\r\n\r\n{}", request_json.len(), request_json);
+        write_half.write_all(message.as_bytes()).await
             .map_err(|e| anyhow!("Failed to write message: {}", e))?;
+        write_half.flush().await
+            .map_err(|e| anyhow!("Failed to flush: {}", e))?;
 
-        // Read response length
-        let mut length_bytes = [0u8; 4];
-        stream.read_exact(&mut length_bytes).await
-            .map_err(|e| anyhow!("Failed to read response length: {}", e))?;
+        // Read messages until we get the final response
+        loop {
+            let message_json = Self::read_lsp_message(&mut reader).await?;
+            debug!("Received message: {}", message_json);
 
-        let response_length = u32::from_be_bytes(length_bytes) as usize;
+            // Try to parse as a generic JSON value first
+            let msg: Value = serde_json::from_str(&message_json)
+                .map_err(|e| anyhow!("Failed to parse message JSON: {}", e))?;
 
-        // Read response data
-        let mut response_bytes = vec![0u8; response_length];
-        stream.read_exact(&mut response_bytes).await
-            .map_err(|e| anyhow!("Failed to read response: {}", e))?;
+            // Check if this is a notification (has method, no id or null id)
+            let is_notification = msg.get("method").is_some() 
+                && (msg.get("id").is_none() || msg.get("id") == Some(&Value::Null));
 
-        // Parse JSON response
-        let response_json = String::from_utf8(response_bytes)
-            .map_err(|e| anyhow!("Invalid UTF-8 in response: {}", e))?;
+            if is_notification {
+                // Parse as notification and invoke callback
+                let notification: JsonRpcNotification = serde_json::from_value(msg)
+                    .map_err(|e| anyhow!("Failed to parse notification: {}", e))?;
+                on_notification(notification);
+            } else {
+                // Parse as response - this is our final message
+                let response: JsonRpcResponse = serde_json::from_value(msg)
+                    .map_err(|e| anyhow!("Failed to parse response: {}", e))?;
 
-        let response: JsonRpcResponse = serde_json::from_str(&response_json)
-            .map_err(|e| anyhow!("Failed to parse response JSON: {}", e))?;
+                // Verify response ID matches request (id is Option<Value>)
+                let response_id = response.id
+                    .as_ref()
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                    
+                if response_id != request_id {
+                    return Err(anyhow!("Response ID mismatch: expected {}, got {}", request_id, response_id));
+                }
 
-        // Verify response ID matches request
-        if response.id != request_id {
-            return Err(anyhow!("Response ID mismatch: expected {}, got {}", request_id, response.id));
+                // Handle error response
+                if let Some(ref error) = response.error {
+                    return Err(anyhow!("JSON-RPC error {}: {}", error.code, error.message));
+                }
+
+                // Return result
+                return response.result
+                    .ok_or_else(|| anyhow!("Response missing both result and error"));
+            }
         }
-
-        // Handle error response
-        if let Some(error) = response.error {
-            return Err(anyhow!("JSON-RPC error {}: {}", error.code, error.message));
-        }
-
-        // Return result
-        response.result
-            .ok_or_else(|| anyhow!("Response missing both result and error"))
     }
 
-    /// Execute configure procedure
-    pub async fn configure(&self, params: Value) -> Result<Value> {
-        let request = ClientRequest::new("kaiak/configure".to_string(), params)
-            .with_client_info(ClientInfo::new(self.socket_path.clone()));
+    /// Read an LSP-style message with Content-Length header
+    async fn read_lsp_message<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R) -> Result<String> {
+        let mut content_length: Option<usize> = None;
 
-        self.call(request).await
+        // Read headers
+        loop {
+            let mut line = String::new();
+            let bytes_read = reader.read_line(&mut line).await
+                .map_err(|e| anyhow!("Failed to read header line: {}", e))?;
+
+            if bytes_read == 0 {
+                return Err(anyhow!("Connection closed while reading headers"));
+            }
+
+            let line = line.trim_end();
+            trace!("Read header: {}", line);
+
+            // Empty line indicates end of headers
+            if line.is_empty() {
+                break;
+            }
+
+            // Parse Content-Length header
+            if let Some(length_str) = line.strip_prefix("Content-Length: ") {
+                content_length = Some(length_str.parse()
+                    .map_err(|e| anyhow!("Invalid Content-Length: {}", e))?);
+            }
+        }
+
+        let content_length = content_length
+            .ok_or_else(|| anyhow!("Missing Content-Length header"))?;
+
+        // Read the JSON content
+        let mut buffer = vec![0u8; content_length];
+        reader.read_exact(&mut buffer).await
+            .map_err(|e| anyhow!("Failed to read message body: {}", e))?;
+
+        String::from_utf8(buffer)
+            .map_err(|e| anyhow!("Invalid UTF-8 in response: {}", e))
     }
 
     /// Execute generate_fix procedure
-    pub async fn generate_fix(&self, params: Value) -> Result<Value> {
+    pub async fn generate_fix<F>(&self, params: Value, on_notification: F) -> Result<Value>
+    where
+        F: FnMut(JsonRpcNotification),
+    {
         let request = ClientRequest::new("kaiak/generate_fix".to_string(), params)
             .with_timeout(300) // 5 minute timeout for AI operations
             .with_client_info(ClientInfo::new(self.socket_path.clone()));
 
-        self.call(request).await
+        self.call(request, on_notification).await
     }
 
     /// Execute delete_session procedure
-    pub async fn delete_session(&self, params: Value) -> Result<Value> {
+    pub async fn delete_session<F>(&self, params: Value, on_notification: F) -> Result<Value>
+    where
+        F: FnMut(JsonRpcNotification),
+    {
         let request = ClientRequest::new("kaiak/delete_session".to_string(), params)
             .with_client_info(ClientInfo::new(self.socket_path.clone()));
 
-        self.call(request).await
+        self.call(request, on_notification).await
     }
 
     /// Get socket path
     pub fn socket_path(&self) -> &str {
         &self.socket_path
+    }
+}
+
+
+/// Manages the connection state file (~/.kaiak/connection)
+pub struct ConnectionState;
+
+impl ConnectionState {
+    /// Get the path to the connection state file
+    pub fn state_file_path() -> Result<PathBuf> {
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow!("Unable to determine home directory"))?;
+        
+        let kaiak_dir = home_dir.join(".kaiak");
+        if !kaiak_dir.exists() {
+            std::fs::create_dir_all(&kaiak_dir)?;
+        }
+        
+        Ok(kaiak_dir.join("connection"))
+    }
+
+    /// Save the current connection (socket path)
+    pub fn save(socket_path: &str) -> Result<()> {
+        let state_file = Self::state_file_path()?;
+        std::fs::write(&state_file, socket_path)?;
+        Ok(())
+    }
+
+    /// Load the current connection (socket path)
+    pub fn load() -> Result<Option<String>> {
+        let state_file = Self::state_file_path()?;
+        
+        if !state_file.exists() {
+            return Ok(None);
+        }
+        
+        let socket_path = std::fs::read_to_string(&state_file)?;
+        let socket_path = socket_path.trim().to_string();
+        
+        if socket_path.is_empty() {
+            return Ok(None);
+        }
+        
+        Ok(Some(socket_path))
+    }
+
+    /// Clear the current connection
+    pub fn clear() -> Result<()> {
+        let state_file = Self::state_file_path()?;
+        
+        if state_file.exists() {
+            std::fs::remove_file(&state_file)?;
+        }
+        
+        Ok(())
+    }
+
+    /// Check if there's an active connection
+    pub fn is_connected() -> Result<bool> {
+        Ok(Self::load()?.is_some())
+    }
+
+    /// Get client for the current connection, or error if not connected
+    pub fn get_client() -> Result<JsonRpcClient> {
+        let socket_path = Self::load()?
+            .ok_or_else(|| anyhow!("Not connected to any server. Use 'kaiak connect <socket_path>' first."))?;
+        
+        Ok(JsonRpcClient::new(socket_path))
     }
 }
 
