@@ -1,13 +1,17 @@
 <!--
   SYNC IMPACT REPORT
-  Version change: [NEW] → 1.0.0
-  Modified principles: N/A (initial constitution)
-  Added sections: Core Principles (6), Development Standards, Quality Assurance, Governance
-  Removed sections: N/A
+  Version change: 1.0.1 → 2.0.0
+  Modified principles:
+    - I. User Experience First → removed progress feedback requirements
+    - II. Testing Integrity → removed test-first requirement
+    - VI. Progressive Development → removed independent testability requirement
+    - VII. Goose API Primacy → new principle added
+  Added sections: VII. Goose API Primacy
+  Removed sections: Quality Assurance > Progress Transparency
   Templates requiring updates:
+    ✅ .specify/templates/tasks-template.md - removed test-first and independent testing references
+    ✅ .specify/templates/spec-template.md - updated independent testing requirements to verification notes
     ✅ .specify/templates/plan-template.md - Constitution Check section aligns
-    ✅ .specify/templates/spec-template.md - Requirements align with UX principles
-    ✅ .specify/templates/tasks-template.md - Testing priority aligns with principles
   Follow-up TODOs: None
 -->
 
@@ -17,11 +21,11 @@
 
 ### I. User Experience First
 
-All features MUST prioritize user experience through clear progress indicators, informative error messages, and comprehensive logging. Long-running operations MUST display progress feedback. Error messages MUST be actionable and include sufficient context for debugging. Every user-facing interaction MUST be thoroughly logged for troubleshooting support.
+All features MUST prioritize user experience through clear error messages and comprehensive logging. Error messages MUST be actionable and include sufficient context for debugging. Every user-facing interaction MUST be thoroughly logged for troubleshooting support.
 
 ### II. Testing Integrity (NON-NEGOTIABLE)
 
-Integration and end-to-end tests MUST take precedence over unit tests. All critical user journeys MUST have corresponding integration tests. Unit tests MUST be written for complex functions and core business logic only. Tests MUST be written and verified to fail before implementation begins. The testing pyramid prioritizes e2e → integration → unit testing coverage.
+Integration and end-to-end tests MUST take precedence over unit tests. All critical user journeys MUST have corresponding integration tests. Unit tests MUST be written for complex functions and core business logic only. The testing pyramid prioritizes e2e → integration → unit testing coverage.
 
 ### III. Enterprise-Safe Communication
 
@@ -37,7 +41,11 @@ All pull requests MUST pass automated testing via GitHub Actions before merge ap
 
 ### VI. Progressive Development
 
-Features MUST be developed incrementally with each increment being independently testable and deployable. Complex features MUST be broken into smaller, valuable user stories. Each development phase MUST deliver measurable user value. Development MUST follow the principle of building working software over comprehensive documentation.
+Features MUST be developed incrementally with each increment delivering measurable user value. Complex features MUST be broken into smaller, valuable user stories. Development MUST follow the principle of building working software over comprehensive documentation.
+
+### VII. Goose API Primacy
+
+All functionality MUST leverage existing Goose APIs and capabilities wherever possible. Creating new implementations that duplicate Goose functionality is FORBIDDEN unless absolutely necessary for integration requirements. When Goose provides a solution, it MUST be used instead of building custom alternatives. New functionality MUST be justified against available Goose capabilities with clear rationale for why Goose's approach is insufficient.
 
 ## Development Standards
 
@@ -60,16 +68,12 @@ Features MUST be developed incrementally with each increment being independently
 ### IPC Architecture Requirements
 
 - Communication channels MUST handle message serialization/deserialization transparently
-- Protocols MUST support streaming for progress updates and large data transfers
+- Protocols MUST support streaming for large data transfers
 - Connection management MUST implement heartbeat and automatic reconnection
 - Message formats MUST be versioned for backward compatibility
 - Error propagation across IPC boundaries MUST preserve context and stack traces
 
 ## Quality Assurance
-
-### Progress Transparency
-
-User interfaces MUST provide real-time feedback for operations exceeding 2 seconds. Progress indicators MUST show percentage completion where possible. Background processes MUST report status through structured logging. Users MUST never experience "silent failures" or unexplained delays.
 
 ### Error Handling Standards
 
@@ -87,4 +91,4 @@ Development teams MUST reference this constitution during planning, implementati
 
 For additional background and detailed context regarding this project, refer to [./context.md](./context.md).
 
-**Version**: 1.0.1 | **Ratified**: 2025-12-23 | **Last Amended**: 2025-12-22
+**Version**: 2.0.0 | **Ratified**: 2025-12-23 | **Last Amended**: 2025-12-30
