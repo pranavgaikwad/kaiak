@@ -75,52 +75,46 @@ kaiak serve --socket /tmp/kaiak.sock
 
 ### First Fix Generation
 
-Kaiak provides a simplified three-endpoint API for agent operations:
-- **kaiak/configure** - Configure agent for a session
-- **kaiak/generate_fix** - Generate fixes for migration incidents
+Kaiak provides a two-method JSON-RPC API:
+- **kaiak/generate_fix** - Generate fixes for migration incidents (streaming)
 - **kaiak/delete_session** - Clean up agent session
 
-**Step 1**: Start the server
+Configuration is provided at server startup via CLI arguments or config files.
+
+#### Using the CLI Client
 
 ```bash
-# Start server with stdio transport (recommended for IDE integration)
-kaiak serve --stdio
+# Step 1: Start the server with Unix socket
+kaiak serve --socket /tmp/kaiak.sock
+
+# Step 2: Connect the CLI client
+kaiak connect /tmp/kaiak.sock
+
+# Step 3: Generate fixes
+kaiak generate-fix --params-json '{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "incidents": [{
+    "id": "issue-1",
+    "rule_id": "deprecated-api",
+    "message": "old_method() is deprecated",
+    "severity": "warning"
+  }],
+  "agent_config": {
+    "workspace": {"working_dir": "/path/to/project"},
+    "model": {"provider": "openai", "model_id": "gpt-4"}
+  }
+}'
+
+# Step 4: Clean up
+kaiak delete-session 550e8400-e29b-41d4-a716-446655440000
+
+# Step 5: Disconnect
+kaiak disconnect
 ```
 
-**Step 2**: Configure the agent (one-time per session)
+#### Using JSON-RPC Directly
 
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "kaiak/configure",
-  "params": {
-    "workspace": {
-      "working_dir": "/path/to/your/project",
-      "include_patterns": ["**/*.rs", "**/*.toml"],
-      "exclude_patterns": ["target/**", "**/*.bak"]
-    },
-    "model": {
-      "provider": "openai",
-      "model": "gpt-4"
-    },
-    "tools": {
-      "enabled_extensions": ["developer", "todo"],
-      "custom_tools": [],
-      "planning_mode": false
-    },
-    "permissions": {
-      "tool_permissions": {
-        "file_write": "approve",
-        "file_read": "allow",
-        "shell_command": "deny"
-      }
-    }
-  },
-  "id": 1
-}
-```
-
-**Step 3**: Generate fixes for identified incidents
+**Generate fixes:**
 
 ```json
 {
@@ -137,35 +131,45 @@ kaiak serve --stdio
         "effort": "low",
         "severity": "warning"
       }
-    ]
+    ],
+    "agent_config": {
+      "workspace": {
+        "working_dir": "/path/to/your/project"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "gpt-4"
+      }
+    }
   },
-  "id": 2
+  "id": 1
 }
 ```
 
-**Step 4**: Monitor real-time progress via streaming notifications
+**Monitor progress via streaming notifications:**
 
-The agent streams events as it works:
-- **kaiak/stream/progress** - Execution progress updates
-- **kaiak/stream/ai_response** - AI model responses
-- **kaiak/stream/tool_call** - Tool execution status
-- **kaiak/stream/user_interaction** - Approval prompts for file modifications
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "kaiak/generateFix/progress",
+  "params": {
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "stage": "analyzing",
+    "progress": 25
+  }
+}
+```
 
-**Step 5**: Clean up when done
+**Clean up when done:**
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "kaiak/delete_session",
   "params": {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
-    "cleanup_options": {
-      "force": false,
-      "cleanup_temp_files": true,
-      "preserve_logs": true
-    }
+    "session_id": "550e8400-e29b-41d4-a716-446655440000"
   },
-  "id": 3
+  "id": 2
 }
 ```
 
@@ -175,30 +179,31 @@ Kaiak follows a modular architecture designed for enterprise safety and performa
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   IDE Client    │◄──►│  Transport Layer │◄──►│  JSON-RPC Core  │
-└─────────────────┘    │   (stdio/socket) │    └─────────────────┘
-                       └──────────────────┘              │
+│   IDE Client    │◄──►│  Transport Layer │◄──►│  JSON-RPC Server│
+│   CLI Client    │    │  (stdio/socket)  │    │  (streaming)    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
                                                          ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│ Session Manager │◄──►│     Handlers     │◄──►│ Stream Manager  │
-│  (LRU Cache)    │    │ (Fix/Lifecycle)  │    │  (Real-time)    │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Goose Agent    │    │ Security Layer   │    │ Config Manager  │
-│  Integration    │    │ (Approval Flow)  │    │  (Validation)   │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │     Handlers     │◄──►│  Notifications  │
+                       │ (generate_fix)   │    │  (real-time)    │
+                       └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │  Agent Manager   │◄──►│ Config Manager  │
+                       │  (Goose Agent)   │    │  (hierarchy)    │
+                       └──────────────────┘    └─────────────────┘
 ```
 
 ### Key Components
 
-- **Transport Layer**: LSP-compatible stdio/socket communication
-- **JSON-RPC Core**: Protocol handling with streaming support
-- **Session Manager**: Concurrent session handling with LRU caching
-- **Goose Integration**: AI agent lifecycle and processing
-- **Security Layer**: File modification approval and validation
-- **Stream Manager**: Real-time progress updates and notifications
+- **Transport Layer**: LSP-compatible stdio and Unix socket communication
+- **JSON-RPC Server**: Protocol handling with method registration and streaming notifications
+- **Handlers**: Request processing for `generate_fix` and `delete_session`
+- **Agent Manager**: Goose AI agent lifecycle and session coordination
+- **Client Module**: CLI client for Unix socket communication
+- **Configuration**: Hierarchical config loading (CLI > file > defaults)
 
 ## Security
 
@@ -221,36 +226,9 @@ socket_path = "/tmp/kaiak.sock"
 log_level = "info"
 max_concurrent_sessions = 10
 
-[ai]
-# Provider configuration is passed as arbitrary JSON to Goose
-# Set via environment variables or session creation parameters
-timeout = 300
-max_turns = 50
 
-[security]
-require_approval = true
-approval_timeout = 300  # 5 minutes
-
-[performance]
-stream_buffer_size = 1000
-session_cache_size = 100
 ```
 
-### Environment Variables
-
-```bash
-# AI Provider Configuration
-export OPENAI_API_KEY="your-key"
-export ANTHROPIC_API_KEY="your-key"
-
-# Kaiak Configuration
-export KAIAK_CONFIG_PATH="/custom/config/path"
-export KAIAK_LOG_LEVEL="debug"
-export KAIAK_WORKSPACE_ROOT="/default/workspace"
-
-# Development
-export RUST_LOG="kaiak=debug"
-```
 
 ## IDE Integration
 
@@ -324,34 +302,31 @@ cargo test quickstart_validation
 
 ```
 src/
-├── main.rs              # Entry point and CLI argument parsing
+├── main.rs              # Entry point, CLI commands, and argument parsing
 ├── lib.rs               # Library exports and error types
-├── server/              # Core server implementation
-│   ├── transport.rs     # IPC transport layer (stdio/socket)
-│   ├── jsonrpc.rs       # JSON-RPC protocol types and error codes
-│   ├── server.rs        # Main LSP server orchestration
+├── jsonrpc/             # JSON-RPC 2.0 implementation
+│   ├── protocol.rs      # Core types (Request, Response, Notification, Error)
+│   ├── transport.rs     # Transport trait (StdioTransport, IpcTransport)
+│   ├── server.rs        # JSON-RPC server with streaming support
+│   ├── methods.rs       # Method constants and registration
+│   ├── core.rs          # Kaiak request/response wrappers
+│   └── mod.rs           # Module exports and method registration
+├── server/              # High-level server orchestration
+│   ├── server.rs        # Server startup and configuration
 │   └── mod.rs           # Server module exports
-├── agents/              # Goose agent integration layer
-│   ├── mod.rs           # GooseAgentManager for agent lifecycle
-│   ├── session_wrapper.rs  # Session management with Goose SessionManager
-│   └── event_streaming.rs  # Event mapping (Goose → Kaiak notifications)
-├── models/              # Data models and entities
-│   ├── configuration.rs # AgentConfiguration (per-session config)
+├── agent/               # Goose agent integration
+│   └── mod.rs           # GooseAgentManager for agent lifecycle
+├── models/              # Data models and configuration
+│   ├── configuration.rs # ServerConfig, BaseConfig, AgentConfig
 │   ├── incidents.rs     # MigrationIncident models
-│   ├── events.rs        # AgentEventNotification types
-│   ├── interactions.rs  # UserInteractionRequest types
-│   ├── session.rs       # Session type re-exports
 │   └── mod.rs           # Model exports
-├── handlers/            # Three-endpoint request handlers
-│   ├── configure.rs     # kaiak/configure handler
-│   ├── generate_fix.rs  # kaiak/generate_fix handler
-│   ├── delete_session.rs # kaiak/delete_session handler
+├── handlers/            # Request handlers
+│   ├── generate_fix.rs  # kaiak/generate_fix (streaming)
+│   ├── delete_session.rs # kaiak/delete_session
 │   └── mod.rs           # Handler exports
-└── config/              # Server configuration management
-    ├── settings.rs      # ServerSettings (server-wide config)
-    ├── security.rs      # Security hardening
-    ├── validation.rs    # Configuration validation
-    └── mod.rs           # Config module and logging setup
+└── client/              # CLI client implementation
+    ├── transport.rs     # JsonRpcClient for Unix socket communication
+    └── mod.rs           # Client exports (ConnectionState, etc.)
 ```
 
 ## Contributing
@@ -378,9 +353,11 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ## License
 
-- **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+**Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
 
 
 ## Acknowledgments
 
 - **Goose AI Agent**: Core AI processing capabilities are provided through [Goose](https://github.com/block/goose).
+
+* AI agents: For project background and context, refer to [.specify/memory/context.md](.specify/memory/context.md).

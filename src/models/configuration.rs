@@ -1,157 +1,133 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use validator::Validate;
 
 // Import actual Goose types
-pub use goose::agents::{SessionConfig as GooseSessionConfig, RetryConfig};
+pub use goose::agents::{ExtensionConfig, SessionConfig as GooseSessionConfig};
+pub use goose::config::permission::PermissionLevel;
 pub use goose::session::SessionType;
 
-// Model configuration will be handled through Goose's provider system
-// We'll use serde_json::Value as a flexible type for now
-pub type GooseModelConfig = serde_json::Value;
-
-/// Per-session agent configuration sent by clients via kaiak/configure endpoint
-///
-/// This is DIFFERENT from config::settings::ServerSettings which controls the server itself.
-/// AgentConfiguration is provided by IDE clients for each individual agent session.
-///
-/// Example: Client sends this in a kaiak/configure request to customize the agent for a specific project.
+/// Unified server configuration for Kaiak server initialization and runtime settings
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct AgentConfiguration {
+pub struct ServerConfig {
+    /// This is set at runtime and cannot be changed until server restart
     #[validate(nested)]
-    pub workspace: WorkspaceConfig,
-    pub model: GooseModelConfig,  // Re-use Goose's model configuration
+    pub init_config: InitConfig,
+
+    /// This is a base set of configuration that server starts with via configuration files
+    /// However, the BaseConfig can be overriden via generate_fix request for a specific session
     #[validate(nested)]
-    pub tools: ToolConfig,
-    pub session: GooseSessionConfig,  // Re-use Goose's session configuration - validated by Goose
-    #[validate(nested)]
-    pub permissions: PermissionConfig,
+    pub base_config: BaseConfig,
 }
 
-/// Per-session workspace configuration (sent by IDE client)
-///
-/// NOTE: This is DIFFERENT from config::settings::DefaultWorkspaceConfig
-/// - DefaultWorkspaceConfig = Server-wide defaults for all sessions
-/// - WorkspaceConfig = Client-specified workspace for this specific session
+/// Immutable server initialization configuration
+/// These settings are set once at server startup and cannot be changed during runtime
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct WorkspaceConfig {
+pub struct InitConfig {
+    /// Transport method: "stdio" or "socket"
+    #[validate(custom(function = "validate_transport_type"))]
+    pub transport: String,
+
+    /// Unix socket path (required when transport = "socket")
+    pub socket_path: Option<String>,
+
+    /// Logging level: trace, debug, info, warn, error
+    #[validate(custom(function = "validate_log_level"))]
+    pub log_level: String,
+
+    /// Maximum concurrent agent sessions
+    #[validate(range(min = 1, max = 100))]
+    pub max_concurrent_sessions: u32,
+}
+
+/// Runtime server base configuration that can be overridden per session
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct BaseConfig {
+    pub model: ModelConfig,
+    // We maintain a map of tool names to their permission levels
+    // TODO (pgaikwad): Deep dive into smart permission settings
+    pub tool_permissions: HashMap<String, PermissionLevel>,
+}
+
+/// Per-session agent configuration sent by clients for individual agent sessions in the generate_fix request
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct AgentConfig {
     #[validate(custom(function = "validate_workspace_path"))]
-    pub working_dir: PathBuf,
-    #[validate(length(min = 1, message = "At least one include pattern is required"))]
-    pub include_patterns: Vec<String>,
-    pub exclude_patterns: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct ToolConfig {
-    pub enabled_extensions: Vec<String>,
+    pub workspace: PathBuf,
+    pub session: GooseSessionConfig,
+    /// override_base_config completely overrides server's base_config
     #[validate(nested)]
-    pub custom_tools: Vec<CustomToolConfig>,
-    pub planning_mode: bool,
-    #[validate(range(min = 1, max = 10000, message = "max_tool_calls must be between 1 and 10000"))]
-    pub max_tool_calls: Option<u32>,
+    pub override_base_config: Option<BaseConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct PermissionConfig {
-    #[validate(length(min = 1, message = "At least one tool permission must be specified"))]
-    pub tool_permissions: HashMap<String, ToolPermission>,
+pub struct ModelConfig {
+    pub provider: String,
+    pub model: String,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolPermission {
-    Allow,       // Always allow this tool
-    Deny,        // Always deny this tool
-    Approve,     // Require user approval for this tool
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
-pub struct CustomToolConfig {
-    #[validate(length(min = 1, max = 100, message = "Tool name must be between 1 and 100 characters"))]
-    pub name: String,
-    pub extension_type: ExtensionType,
-    pub config: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExtensionType {
-    Stdio,
-    Sse,
-    Platform,
-    Frontend,
-}
-
-impl Default for WorkspaceConfig {
+impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            include_patterns: vec!["**/*".to_string()],
-            exclude_patterns: vec![
-                ".git/**".to_string(),
-                "target/**".to_string(),
-                "node_modules/**".to_string(),
-            ],
+            init_config: InitConfig::default(),
+            base_config: BaseConfig::default(),
         }
     }
 }
 
-impl Default for ToolConfig {
+impl Default for InitConfig {
     fn default() -> Self {
         Self {
-            enabled_extensions: vec![
-                "developer".to_string(),
-                "todo".to_string(),
-                "extensionmanager".to_string(),
-            ],
-            custom_tools: vec![],
-            planning_mode: false,
-            max_tool_calls: Some(10),
+            transport: "stdio".to_string(),
+            socket_path: None,
+            log_level: "info".to_string(),
+            max_concurrent_sessions: 10,
         }
     }
 }
 
-impl Default for PermissionConfig {
-    fn default() -> Self {
-        let mut tool_permissions = HashMap::new();
-        tool_permissions.insert("read_file".to_string(), ToolPermission::Allow);
-        tool_permissions.insert("write_file".to_string(), ToolPermission::Approve);
-        tool_permissions.insert("shell_command".to_string(), ToolPermission::Deny);
-        tool_permissions.insert("web_search".to_string(), ToolPermission::Allow);
-
-        Self {
-            tool_permissions,
-        }
-    }
-}
-
-impl Default for AgentConfiguration {
+impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            workspace: WorkspaceConfig::default(),
-            model: serde_json::json!({
-                "provider": "databricks",
-                "model": "databricks-meta-llama-3-1-405b-instruct",
-                "temperature": 0.1,
-                "max_tokens": 4096
-            }),
-            tools: ToolConfig::default(),
+            workspace: PathBuf::from("."),
             session: GooseSessionConfig {
                 id: uuid::Uuid::new_v4().to_string(),
                 schedule_id: None,
                 max_turns: Some(1000),
                 retry_config: None,
             },
-            permissions: PermissionConfig::default(),
+            override_base_config: Some(BaseConfig::default()),
         }
     }
 }
 
-impl AgentConfiguration {
+impl Default for BaseConfig {
+    fn default() -> Self {
+        Self {
+            model: ModelConfig::default(),
+            // TODO (pgaikwad): revisit this
+            tool_permissions: HashMap::new(),
+        }
+    }
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            provider: "openai".to_string(),
+            model: "gpt-4o".to_string(),
+            temperature: Some(0.01),
+            max_tokens: None,
+        }
+    }
+}
+
+impl AgentConfig {
     /// Validate and optionally generate a new session ID if none provided
-    /// T029: Session validation for client-generated UUIDs
     pub fn ensure_valid_session_id(&mut self) -> Result<(), String> {
         // If session ID is empty, generate a new one
         if self.session.id.is_empty() {
@@ -162,12 +138,14 @@ impl AgentConfiguration {
         // Validate the provided session ID is a valid UUID
         match uuid::Uuid::parse_str(&self.session.id) {
             Ok(_) => Ok(()),
-            Err(_) => Err(format!("Invalid UUID format for session ID: {}", self.session.id)),
+            Err(_) => Err(format!(
+                "Invalid UUID format for session ID: {}",
+                self.session.id
+            )),
         }
     }
 
     /// Create a new configuration with a specific session ID
-    /// T029: Utility for creating configurations with validated session IDs
     pub fn with_session_id(session_id: String) -> Result<Self, String> {
         // Validate session ID is a proper UUID
         uuid::Uuid::parse_str(&session_id)
@@ -177,19 +155,207 @@ impl AgentConfiguration {
         config.session.id = session_id;
         Ok(config)
     }
+}
 
-    /// Get the session ID, ensuring it's valid
-    /// T029: Safe access to session ID with validation
-    pub fn validated_session_id(&self) -> Result<&str, String> {
-        if self.session.id.is_empty() {
-            return Err("Session ID is empty".to_string());
+/// Configuration hierarchy manager that merges multiple configuration sources
+/// Handles precedence: CLI args > user config > default config > hardcoded defaults
+#[derive(Debug, Clone)]
+pub struct ConfigurationHierarchy {
+    /// Final resolved configuration
+    pub resolved: ServerConfig,
+
+    /// Sources used in resolution (for debugging)
+    pub sources: Vec<ConfigSource>,
+}
+
+/// Information about a configuration source for debugging and audit trails
+#[derive(Debug, Clone)]
+pub struct ConfigSource {
+    pub name: String,                 // e.g., "CLI arguments", "~/.kaiak/server.conf"
+    pub priority: u8,                 // Higher number = higher priority
+    pub fields_provided: Vec<String>, // Which fields this source provided
+}
+
+impl ConfigurationHierarchy {
+    /// Load configuration with precedence: CLI > user config > default config > hardcoded
+    pub fn load_with_precedence(
+        cli_overrides: Option<&ServerConfig>,
+        user_config_path: Option<PathBuf>,
+        default_config_path: Option<PathBuf>,
+    ) -> Result<Self> {
+        let mut sources = Vec::new();
+        let mut resolved = ServerConfig::default();
+
+        // Start with hardcoded defaults (lowest priority)
+        sources.push(ConfigSource {
+            name: "Hardcoded defaults".to_string(),
+            priority: 1,
+            fields_provided: vec!["all".to_string()],
+        });
+
+        // Load default config file if exists
+        if let Some(default_path) = default_config_path {
+            if default_path.exists() {
+                match Self::load_config_file(&default_path) {
+                    Ok(config) => {
+                        resolved = Self::merge_configs(resolved, config); 
+                        sources.push(ConfigSource {
+                            name: format!("Default config: {}", default_path.display()),
+                            priority: 2,
+                            fields_provided: vec!["loaded from file".to_string()],
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to load default config {}: {}",
+                            default_path.display(),
+                            e
+                        );
+                    }
+                }
+            }
         }
 
-        // Validate UUID format
-        uuid::Uuid::parse_str(&self.session.id)
-            .map_err(|_| format!("Invalid UUID format for session ID: {}", self.session.id))?;
+        // Load user config file if exists
+        if let Some(user_path) = user_config_path {
+            if user_path.exists() {
+                match Self::load_config_file(&user_path) {
+                    Ok(config) => {
+                        resolved = Self::merge_configs(resolved, config);
+                        sources.push(ConfigSource {
+                            name: format!("User config: {}", user_path.display()),
+                            priority: 3,
+                            fields_provided: vec!["loaded from file".to_string()],
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to load user config {}: {}", user_path.display(), e);
+                    }
+                }
+            }
+        }
 
-        Ok(&self.session.id)
+        // Apply CLI overrides (highest priority)
+        if let Some(cli_config) = cli_overrides {
+            resolved = Self::merge_configs(resolved, cli_config.clone());
+            sources.push(ConfigSource {
+                name: "CLI arguments".to_string(),
+                priority: 4,
+                fields_provided: vec!["CLI overrides".to_string()],
+            });
+        }
+
+        Ok(ConfigurationHierarchy { resolved, sources })
+    }
+
+    /// Apply environment variable overrides
+    pub fn apply_env_overrides(&mut self) -> Result<()> {
+        let mut env_overrides = Vec::new();
+
+        if let Ok(val) = std::env::var("KAIAK_LOG_LEVEL") {
+            self.resolved.init_config.log_level = val.clone();
+            env_overrides.push(format!("KAIAK_LOG_LEVEL={}", val));
+        }
+        if !env_overrides.is_empty() {
+            self.sources.push(ConfigSource {
+                name: "Environment variables".to_string(),
+                priority: 5,
+                fields_provided: env_overrides,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Validate final configuration
+    pub fn validate(&self) -> Result<()> {
+        self.resolved
+            .validate()
+            .map_err(|e| anyhow::anyhow!("Configuration validation failed: {}", e))
+    }
+
+    /// Load configuration from a TOML file
+    fn load_config_file(path: &PathBuf) -> Result<ServerConfig> {
+        let content = std::fs::read_to_string(path)?;
+        let config: ServerConfig = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    /// Merge two configurations (second takes precedence)
+    /// Right now, we just replace with the override_config
+    fn merge_configs(_base: ServerConfig, override_config: ServerConfig) -> ServerConfig {
+        override_config
+    }
+
+    /// Get the default user config path: ~/.kaiak/server.conf
+    pub fn default_user_config_path() -> Result<PathBuf> {
+        let home_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Unable to determine home directory"))?;
+
+        let kaiak_dir = home_dir.join(".kaiak");
+
+        // Create .kaiak directory if it doesn't exist
+        if !kaiak_dir.exists() {
+            std::fs::create_dir_all(&kaiak_dir)?;
+        }
+
+        Ok(kaiak_dir.join("server.conf"))
+    }
+}
+
+impl ServerConfig {
+    /// Load server configuration from the default user config path, 
+    /// falling back to defaults if the file doesn't exist
+    pub fn load() -> Result<Self> {
+        let config_path = ConfigurationHierarchy::default_user_config_path()?;
+        
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            let config: ServerConfig = toml::from_str(&content)?;
+            Ok(config)
+        } else {
+            Ok(Self::default())
+        }
+    }
+
+    /// Get the default config path (delegates to ConfigurationHierarchy)
+    pub fn config_path() -> Result<PathBuf> {
+        ConfigurationHierarchy::default_user_config_path()
+    }
+
+    /// Validate the complete configuration
+    pub fn validate(&self) -> Result<()> {
+        // Validate nested structures using validator trait
+        Validate::validate(self).map_err(|e| anyhow::anyhow!("Validation failed: {:?}", e))?;
+
+        // Additional business logic validation
+        if self.init_config.max_concurrent_sessions == 0 {
+            anyhow::bail!("Max concurrent sessions must be greater than 0");
+        }
+
+        // Validate socket path when using socket transport
+        if self.init_config.transport == "socket" && self.init_config.socket_path.is_none() {
+            anyhow::bail!("Socket path is required when transport is 'socket'");
+        }
+
+        Ok(())
+    }
+}
+
+// Validation functions for InitConfig
+fn validate_transport_type(transport: &str) -> Result<(), validator::ValidationError> {
+    match transport {
+        "stdio" | "socket" => Ok(()),
+        _ => Err(validator::ValidationError::new(
+            "Transport must be 'stdio' or 'socket'",
+        )),
+    }
+}
+
+fn validate_log_level(level: &str) -> Result<(), validator::ValidationError> {
+    match level {
+        "trace" | "debug" | "info" | "warn" | "error" => Ok(()),
+        _ => Err(validator::ValidationError::new("Invalid log level")),
     }
 }
 
@@ -202,7 +368,9 @@ fn validate_workspace_path(path: &PathBuf) -> Result<(), validator::ValidationEr
 
     // Check if path contains valid UTF-8
     if path.to_str().is_none() {
-        return Err(validator::ValidationError::new("workspace_path_invalid_utf8"));
+        return Err(validator::ValidationError::new(
+            "workspace_path_invalid_utf8",
+        ));
     }
 
     // Check for reasonable path length (avoid extremely long paths)
@@ -213,38 +381,4 @@ fn validate_workspace_path(path: &PathBuf) -> Result<(), validator::ValidationEr
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_workspace_config() {
-        let config = WorkspaceConfig::default();
-        assert!(!config.include_patterns.is_empty());
-        assert!(!config.exclude_patterns.is_empty());
-        assert!(config.exclude_patterns.contains(&".git/**".to_string()));
-    }
-
-    #[test]
-    fn test_permission_serialization() {
-        let permission = ToolPermission::Approve;
-        let serialized = serde_json::to_string(&permission).unwrap();
-        assert_eq!(serialized, "\"approve\"");
-    }
-
-    #[test]
-    fn test_extension_type_serialization() {
-        let ext_type = ExtensionType::Stdio;
-        let serialized = serde_json::to_string(&ext_type).unwrap();
-        assert_eq!(serialized, "\"stdio\"");
-    }
-
-    #[test]
-    fn test_agent_configuration_default() {
-        let config = AgentConfiguration::default();
-        assert_eq!(config.tools.enabled_extensions.len(), 3);
-        assert!(!config.session.id.is_empty());
-    }
 }

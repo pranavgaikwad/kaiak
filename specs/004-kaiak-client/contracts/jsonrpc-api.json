@@ -1,0 +1,489 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kaiak JSON-RPC API Contract",
+  "description": "JSON-RPC 2.0 API contract for Kaiak client-server communication",
+  "type": "object",
+
+  "definitions": {
+    "jsonrpc_request": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "id"],
+      "properties": {
+        "jsonrpc": {"const": "2.0"},
+        "method": {"type": "string"},
+        "params": {"type": "object"},
+        "id": {"type": ["string", "number", "null"]}
+      }
+    },
+
+    "jsonrpc_response": {
+      "type": "object",
+      "required": ["jsonrpc", "id"],
+      "oneOf": [
+        {
+          "required": ["result"],
+          "properties": {
+            "jsonrpc": {"const": "2.0"},
+            "id": {"type": ["string", "number", "null"]},
+            "result": {}
+          }
+        },
+        {
+          "required": ["error"],
+          "properties": {
+            "jsonrpc": {"const": "2.0"},
+            "id": {"type": ["string", "number", "null"]},
+            "error": {
+              "type": "object",
+              "required": ["code", "message"],
+              "properties": {
+                "code": {"type": "integer"},
+                "message": {"type": "string"},
+                "data": {}
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+
+  "methods": {
+    "kaiak/configure": {
+      "description": "Configure server's base configuration (model, tools, permissions). Does not create or modify sessions.",
+      "request": {
+        "allOf": [
+          {"$ref": "#/definitions/jsonrpc_request"},
+          {
+            "properties": {
+              "method": {"const": "kaiak/configure"},
+              "params": {
+                "type": "object",
+                "description": "Updates server's BaseConfig only",
+                "properties": {
+                  "model": {
+                    "type": "object",
+                    "description": "Goose model configuration - updates server's base model config"
+                  },
+                  "tools": {
+                    "type": "object",
+                    "description": "Tool configuration - updates server's base tool settings",
+                    "properties": {
+                      "enabled_extensions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": ["developer", "todo"]
+                      },
+                      "custom_tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": ["name", "tool_type"],
+                          "properties": {
+                            "name": {"type": "string"},
+                            "tool_type": {"enum": ["mcp_server", "builtin_extension"]},
+                            "config": {"type": "object"}
+                          }
+                        }
+                      },
+                      "planning_mode": {"type": "boolean", "default": false}
+                    }
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "description": "Permission configuration - updates server's base permissions",
+                    "properties": {
+                      "tool_permissions": {
+                        "type": "object",
+                        "patternProperties": {
+                          ".*": {"enum": ["allow", "deny", "approve"]}
+                        }
+                      },
+                      "approval_timeout": {"type": "integer", "default": 300}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "response": {
+        "allOf": [
+          {"$ref": "#/definitions/jsonrpc_response"},
+          {
+            "properties": {
+              "result": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": {"enum": ["configured", "updated"]},
+                  "applied_config": {
+                    "type": "object",
+                    "description": "The BaseConfig that was applied to the server"
+                  },
+                  "warnings": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    "kaiak/generate_fix": {
+      "description": "Generate fixes for migration incidents. Creates new session if session_id doesn't exist, using provided AgentConfig.",
+      "request": {
+        "allOf": [
+          {"$ref": "#/definitions/jsonrpc_request"},
+          {
+            "properties": {
+              "method": {"const": "kaiak/generate_fix"},
+              "params": {
+                "type": "object",
+                "required": ["incidents", "agentConfig"],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Optional session ID. If not provided or doesn't exist, creates new session with agentConfig"
+                  },
+                  "incidents": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["id", "rule_id", "message"],
+                      "properties": {
+                        "id": {"type": "string"},
+                        "rule_id": {"type": "string"},
+                        "message": {"type": "string"},
+                        "description": {"type": "string"},
+                        "effort": {"enum": ["low", "medium", "high"]},
+                        "severity": {"enum": ["info", "warning", "error"]}
+                      }
+                    }
+                  },
+                  "agentConfig": {
+                    "type": "object",
+                    "required": ["workspace"],
+                    "description": "Agent configuration used for session creation. Ignored if session_id already exists.",
+                    "properties": {
+                      "workspace": {
+                        "type": "object",
+                        "required": ["working_dir"],
+                        "properties": {
+                          "working_dir": {"type": "string"},
+                          "include_patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "default": ["**/*"]
+                          },
+                          "exclude_patterns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "default": ["target/**", "node_modules/**", ".git/**"]
+                          }
+                        }
+                      },
+                      "session": {
+                        "type": "object",
+                        "description": "Goose session configuration - validated by Goose"
+                      },
+                      "overrideBaseConfig": {
+                        "type": "object",
+                        "description": "Completely overrides the server's BaseConfig for this session",
+                        "properties": {
+                          "model": {
+                            "type": "object",
+                            "description": "Goose model configuration"
+                          },
+                          "tools": {
+                            "type": "object",
+                            "properties": {
+                              "enabled_extensions": {"type": "array", "items": {"type": "string"}},
+                              "custom_tools": {"type": "array"},
+                              "planning_mode": {"type": "boolean"}
+                            }
+                          },
+                          "permissions": {
+                            "type": "object",
+                            "properties": {
+                              "tool_permissions": {"type": "object"},
+                              "approval_timeout": {"type": "integer"}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "interaction_context": {
+                    "type": "object",
+                    "properties": {
+                      "migration_hint": {"type": "string"},
+                      "programming_language": {"type": "string"},
+                      "enable_agent_mode": {"type": "boolean", "default": false}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "response": {
+        "allOf": [
+          {"$ref": "#/definitions/jsonrpc_response"},
+          {
+            "properties": {
+              "result": {
+                "type": "object",
+                "required": ["session_id", "status"],
+                "properties": {
+                  "session_id": {"type": "string", "format": "uuid"},
+                  "status": {"enum": ["processing", "completed", "failed"]},
+                  "completed_at": {"type": "string", "format": "date-time"},
+                  "agent_response": {"type": "string"},
+                  "session_created": {
+                    "type": "boolean",
+                    "description": "True if a new session was created for this request"
+                  },
+                  "errors": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    "kaiak/delete_session": {
+      "description": "Clean up agent session",
+      "request": {
+        "allOf": [
+          {"$ref": "#/definitions/jsonrpc_request"},
+          {
+            "properties": {
+              "method": {"const": "kaiak/delete_session"},
+              "params": {
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                  "session_id": {"type": "string", "format": "uuid"},
+                  "force": {"type": "boolean", "default": false},
+                  "cleanup": {"type": "boolean", "default": true}
+                }
+              }
+            }
+          }
+        ]
+      },
+      "response": {
+        "allOf": [
+          {"$ref": "#/definitions/jsonrpc_response"},
+          {
+            "properties": {
+              "result": {
+                "type": "object",
+                "required": ["session_id", "status"],
+                "properties": {
+                  "session_id": {"type": "string", "format": "uuid"},
+                  "status": {"enum": ["deleted", "not_found", "error"]},
+                  "cleanup_performed": {"type": "boolean"},
+                  "message": {"type": "string"}
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+
+  "error_codes": {
+    "description": "Standard JSON-RPC error codes used by Kaiak",
+    "codes": {
+      "-32700": {
+        "name": "PARSE_ERROR",
+        "message": "Parse error",
+        "description": "Invalid JSON was received by the server"
+      },
+      "-32600": {
+        "name": "INVALID_REQUEST",
+        "message": "Invalid Request",
+        "description": "The JSON sent is not a valid Request object"
+      },
+      "-32601": {
+        "name": "METHOD_NOT_FOUND",
+        "message": "Method not found",
+        "description": "The method does not exist / is not available"
+      },
+      "-32602": {
+        "name": "INVALID_PARAMS",
+        "message": "Invalid params",
+        "description": "Invalid method parameter(s)"
+      },
+      "-32603": {
+        "name": "INTERNAL_ERROR",
+        "message": "Internal error",
+        "description": "Internal JSON-RPC error"
+      },
+      "-32001": {
+        "name": "SESSION_NOT_FOUND",
+        "message": "Session not found",
+        "description": "The specified session ID does not exist"
+      },
+      "-32002": {
+        "name": "CONFIGURATION_ERROR",
+        "message": "Configuration error",
+        "description": "Configuration validation failed or malformed"
+      },
+      "-32003": {
+        "name": "AGENT_INITIALIZATION_FAILED",
+        "message": "Agent initialization failed",
+        "description": "Failed to initialize Goose agent with provided configuration"
+      },
+      "-32004": {
+        "name": "WORKSPACE_ERROR",
+        "message": "Workspace error",
+        "description": "Invalid workspace path or permission issues"
+      },
+      "-32005": {
+        "name": "SESSION_LOCKED",
+        "message": "Session locked",
+        "description": "Session is currently locked by another operation"
+      }
+    }
+  },
+
+  "transport": {
+    "description": "Transport layer specifications for JSON-RPC communication",
+    "stdio": {
+      "description": "Communication over stdin/stdout for IDE integration",
+      "format": "newline-delimited JSON",
+      "example": {
+        "request": "{\"jsonrpc\":\"2.0\",\"method\":\"kaiak/configure\",\"params\":{...},\"id\":\"1\"}\n",
+        "response": "{\"jsonrpc\":\"2.0\",\"result\":{...},\"id\":\"1\"}\n"
+      }
+    },
+    "unix_socket": {
+      "description": "Communication over Unix domain socket for CLI client",
+      "path_pattern": "/tmp/kaiak-{pid}.sock or user-specified path",
+      "format": "length-prefixed JSON messages",
+      "example": {
+        "connection": "Connect to socket, send length-prefixed JSON, read response",
+        "request": "0000042{\"jsonrpc\":\"2.0\",\"method\":\"kaiak/configure\",\"params\":{...},\"id\":\"1\"}",
+        "response": "0000038{\"jsonrpc\":\"2.0\",\"result\":{...},\"id\":\"1\"}"
+      }
+    }
+  },
+
+  "client_usage_examples": {
+    "configure_server": {
+      "description": "Configure server's base configuration (affects all future sessions)",
+      "cli": "kaiak configure --input-json '{\"model\":{\"provider\":\"openai\"},\"tools\":{\"planning_mode\":true}}'",
+      "jsonrpc": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/configure",
+        "params": {
+          "model": {
+            "provider": "openai",
+            "model": "gpt-4"
+          },
+          "tools": {
+            "enabled_extensions": ["developer", "todo"],
+            "planning_mode": true
+          },
+          "permissions": {
+            "tool_permissions": {
+              "read_file": "allow",
+              "write_file": "approve"
+            }
+          }
+        },
+        "id": "1"
+      }
+    },
+    "generate_fix_new_session": {
+      "description": "Generate fixes, creating new session with specific AgentConfig",
+      "cli": "kaiak generate_fix --input incidents.json",
+      "jsonrpc": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/generate_fix",
+        "params": {
+          "incidents": [
+            {
+              "id": "issue-1",
+              "rule_id": "deprecated-api",
+              "message": "Replace old_method() with new_method()",
+              "effort": "low",
+              "severity": "warning"
+            }
+          ],
+          "agentConfig": {
+            "workspace": {
+              "working_dir": "/path/to/project",
+              "include_patterns": ["**/*.java"],
+              "exclude_patterns": ["target/**"]
+            },
+            "session": {
+              "name": "Spring Boot Migration"
+            },
+            "overrideBaseConfig": {
+              "model": {
+                "provider": "anthropic",
+                "model": "claude-3-sonnet"
+              }
+            }
+          },
+          "interaction_context": {
+            "migration_hint": "Spring Boot 2.x to 3.x migration",
+            "programming_language": "java"
+          }
+        },
+        "id": "2"
+      }
+    },
+    "generate_fix_existing_session": {
+      "description": "Generate fixes using existing session (agentConfig ignored)",
+      "cli": "kaiak generate_fix --session 550e8400-e29b-41d4-a716-446655440000 --input incidents.json",
+      "jsonrpc": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/generate_fix",
+        "params": {
+          "session_id": "550e8400-e29b-41d4-a716-446655440000",
+          "incidents": [
+            {
+              "id": "issue-2",
+              "rule_id": "deprecated-config",
+              "message": "Update configuration format"
+            }
+          ],
+          "agentConfig": {
+            "workspace": {"working_dir": "/ignored"},
+            "comment": "This agentConfig will be ignored since session_id exists"
+          }
+        },
+        "id": "3"
+      }
+    },
+    "delete_session": {
+      "description": "Clean up agent session",
+      "cli": "kaiak delete_session --session 550e8400-e29b-41d4-a716-446655440000",
+      "jsonrpc": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/delete_session",
+        "params": {
+          "session_id": "550e8400-e29b-41d4-a716-446655440000",
+          "cleanup": true
+        },
+        "id": "4"
+      }
+    }
+  }
+}

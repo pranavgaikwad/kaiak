@@ -4,81 +4,64 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use validator::Validate;
+use goose::conversation::message::Message;
+use goose::agents::AgentEvent;
 
-use crate::models::incidents::MigrationIncident;
-use crate::agents::GooseAgentManager;
+use crate::models::{configuration::AgentConfig, incidents::MigrationIncident};
+use crate::agent::GooseAgentManager;
+use crate::jsonrpc::{JsonRpcNotification, NotificationSender};
 use crate::KaiakResult;
 
 /// Request type for kaiak/generate_fix endpoint
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct GenerateFixRequest {
-    /// Session identifier for agent execution
-    #[validate(length(min = 1, message = "Session ID cannot be empty"))]
-    #[validate(custom(function = "validate_uuid_format"))]
-    pub session_id: String,
+    /// Optional session identifier - if not provided, a new session will be created
+    /// and the generated session ID will be returned in the response
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     /// Array of migration incidents to process
     #[validate(length(min = 1, max = 1000, message = "Must provide 1-1000 incidents"))]
     #[validate(nested)]
     pub incidents: Vec<MigrationIncident>,
     /// Optional context for the migration process
     pub migration_context: Option<serde_json::Value>,
+    pub agent_config: AgentConfig,
 }
 
 /// Response type for kaiak/generate_fix endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateFixResponse {
-    /// Unique request identifier for tracking
     pub request_id: String,
-    /// Session identifier
     pub session_id: String,
-    /// Processing status
-    pub status: GenerateFixStatus,
-    /// Number of incidents being processed
-    pub incident_count: usize,
-    /// Request creation timestamp
     pub created_at: String,
-    /// Estimated completion time if available
-    pub estimated_completion: Option<String>,
-}
-
-/// Status of fix generation request
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GenerateFixStatus {
-    /// Request accepted and queued for processing
-    Accepted,
-    /// Processing in progress
-    Processing,
-    /// Processing completed successfully
-    Completed,
-    /// Processing failed with errors
-    Failed,
-    /// Request was rejected due to validation errors
-    Rejected,
 }
 
 /// Handler for kaiak/generate_fix endpoint
 /// Coordinates with Goose agent to process migration incidents
 pub struct GenerateFixHandler {
-    /// Agent manager for session coordination
     agent_manager: Arc<GooseAgentManager>,
-    /// Active requests tracking
     active_requests: Arc<RwLock<std::collections::HashMap<String, GenerateFixRequest>>>,
+    /// Base configuration of the server, if user did not
+    /// provide an agent config, we will take values from this
+    base_config: Arc<crate::models::configuration::BaseConfig>,
 }
 
 impl GenerateFixHandler {
-    pub fn new(agent_manager: Arc<GooseAgentManager>) -> Self {
+    pub fn new(agent_manager: Arc<GooseAgentManager>, base_config: Arc<crate::models::configuration::BaseConfig>) -> Self {
         Self {
             agent_manager,
             active_requests: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            base_config,
         }
     }
 
-    /// Handle generate fix request
-    pub async fn handle_generate_fix(&self, request: GenerateFixRequest) -> KaiakResult<GenerateFixResponse> {
-        info!("Processing generate_fix request for session: {}", request.session_id);
+    pub async fn handle_generate_fix(
+        &self, 
+        request: GenerateFixRequest,
+        notifier: NotificationSender,
+    ) -> KaiakResult<GenerateFixResponse> {
+        info!("Processing generate_fix request for session: {:?}", request.session_id);
 
-        // Validate request using serde validator
         if let Err(validation_errors) = request.validate() {
             error!("Request validation failed: {:?}", validation_errors);
             let error_messages: Vec<String> = validation_errors
@@ -96,35 +79,21 @@ impl GenerateFixHandler {
                 None,
             ));
         }
-
-        // Additional custom validation
-        self.validate_request(&request).await?;
-
-        // Generate unique request ID
         let request_id = Uuid::new_v4().to_string();
-
-        // Store request for tracking
         {
             let mut active = self.active_requests.write().await;
             active.insert(request_id.clone(), request.clone());
         }
 
-        // Count incidents
-        let incident_count = request.incidents.len();
-        info!("Processing {} migration incidents", incident_count);
+        info!("Processing {} migration incidents", request.incidents.len());
 
-        // For User Story 1, we implement the API surface but defer actual agent execution to User Story 3
-        // This creates a proper response structure and validates inputs
-        match self.initiate_agent_processing(&request_id, &request).await {
-            Ok(_) => {
-                info!("Generate fix request {} initiated successfully", request_id);
+        match self.initiate_agent_processing(&request_id, &request, &notifier).await {
+            Ok(session_id) => {
+                info!("Generate fix request {} completed successfully with session {}", request_id, session_id);
                 Ok(GenerateFixResponse {
                     request_id,
-                    session_id: request.session_id,
-                    status: GenerateFixStatus::Accepted,
-                    incident_count,
+                    session_id,
                     created_at: chrono::Utc::now().to_rfc3339(),
-                    estimated_completion: self.estimate_completion_time(incident_count),
                 })
             }
             Err(e) => {
@@ -136,15 +105,40 @@ impl GenerateFixHandler {
                     active.remove(&request_id);
                 }
 
-                Ok(GenerateFixResponse {
-                    request_id,
-                    session_id: request.session_id,
-                    status: GenerateFixStatus::Failed,
-                    incident_count,
-                    created_at: chrono::Utc::now().to_rfc3339(),
-                    estimated_completion: None,
-                })
+                Err(e)
             }
+        }
+    }
+
+    /// Send a progress notification to the client
+    fn send_progress(
+        &self,
+        notifier: &NotificationSender,
+        session_id: &str,
+        stage: &str,
+        progress: u8,
+        data: Option<serde_json::Value>,
+    ) {
+        let mut params = serde_json::json!({
+            "session_id": session_id,
+            "stage": stage,
+            "progress": progress,
+        });
+        
+        if let Some(extra) = data {
+            if let Some(obj) = params.as_object_mut() {
+                if let Some(extra_obj) = extra.as_object() {
+                    for (k, v) in extra_obj {
+                        obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+
+        let notification = JsonRpcNotification::new("kaiak/generateFix/progress", Some(params));
+        
+        if let Err(e) = notifier.send(notification) {
+            warn!("Failed to send progress notification: {}", e);
         }
     }
 
@@ -154,117 +148,98 @@ impl GenerateFixHandler {
         active.len()
     }
 
-    /// Validate generate fix request
-    async fn validate_request(&self, request: &GenerateFixRequest) -> KaiakResult<()> {
-        // Validate session ID format
-        if request.session_id.is_empty() {
-            return Err(crate::KaiakError::session("Session ID cannot be empty".to_string(), Some(request.session_id.clone())));
-        }
-
-        // Validate UUID format for session ID
-        if Uuid::parse_str(&request.session_id).is_err() {
-            return Err(crate::KaiakError::session("Session ID must be a valid UUID".to_string(), Some(request.session_id.clone())));
-        }
-
-        // Validate incidents array
-        if request.incidents.is_empty() {
-            return Err(crate::KaiakError::agent("At least one incident must be provided".to_string(), None));
-        }
-
-        // Validate individual incidents
-        for (i, incident) in request.incidents.iter().enumerate() {
-            if incident.id.is_empty() {
-                return Err(crate::KaiakError::agent(format!("Incident {} has empty ID", i), None));
-            }
-            if incident.rule_id.is_empty() {
-                return Err(crate::KaiakError::agent(format!("Incident {} has empty rule_id", i), None));
-            }
-        }
-
-        // Check for reasonable incident count (prevent overload)
-        if request.incidents.len() > 1000 {
-            return Err(crate::KaiakError::ResourceExhausted("Too many incidents in single request (max: 1000)".to_string()));
-        }
-
-        Ok(())
-    }
-
     /// Initiate agent processing with Goose session management
-    /// User Story 2: Session creation/lookup integration
-    /// User Story 3: Full agent execution (upcoming)
-    async fn initiate_agent_processing(&self, request_id: &str, request: &GenerateFixRequest) -> KaiakResult<()> {
+    async fn initiate_agent_processing(
+        &self, 
+        request_id: &str, 
+        request: &GenerateFixRequest,
+        notifier: &NotificationSender,
+    ) -> KaiakResult<String> {
         debug!("Initiating agent processing for request: {}", request_id);
 
-        // User Story 2: Use Goose SessionManager for session management
-        // Try to lock the session to prevent concurrent access
-        match self.agent_manager.lock_session(&request.session_id).await {
-            Ok(_) => {
-                debug!("Successfully locked session: {}", request.session_id);
-            }
-            Err(e) => {
-                error!("Failed to lock session {}: {}", request.session_id, e);
-                return Err(e);
-            }
-        }
-
-        // Create a default configuration for session creation if needed
-        let config = crate::models::configuration::AgentConfiguration::default();
-
-        // Get or create session using Goose SessionManager
-        let session_info = match self.agent_manager.get_or_create_session(&request.session_id, &config).await {
+        let session_info = match self.agent_manager.get_or_create_session(
+            request.session_id.as_deref(), 
+            &request.agent_config
+        ).await {
             Ok(session_info) => {
                 debug!("Session ready for processing: {} (workspace: {:?})",
-                       request.session_id,
-                       session_info.configuration.workspace.working_dir);
+                       session_info.session.id,
+                       request.agent_config.workspace);
                 session_info
             }
             Err(e) => {
-                error!("Failed to get or create session {}: {}", request.session_id, e);
-                // Unlock session on failure
-                if let Err(unlock_err) = self.agent_manager.unlock_session(&request.session_id).await {
-                    warn!("Failed to unlock session after error: {}", unlock_err);
-                }
+                error!("Failed to get or create session: {}", e);
                 return Err(e);
             }
         };
 
-        // Validate workspace is accessible using actual session configuration
-        let workspace_path = &session_info.configuration.workspace.working_dir;
-        if !workspace_path.exists() {
-            error!("Workspace directory does not exist: {:?}", workspace_path);
-            self.agent_manager.unlock_session(&request.session_id).await.ok();
-            return Err(crate::KaiakError::workspace(
-                "Workspace directory does not exist".to_string(),
-                Some(workspace_path.to_string_lossy().to_string())
-            ));
+        let session_id = session_info.session.id.clone();
+
+        // Lock the session to prevent other requests from using it
+        match self.agent_manager.lock_session(&session_id).await {
+            Ok(_) => {
+                debug!("Successfully locked session: {}", session_id);
+            }
+            Err(e) => {
+                error!("Failed to lock session {}: {}", session_id, e);
+                return Err(e);
+            }
         }
 
-        // Log incident processing preparation
-        debug!("Prepared {} incidents for processing in workspace: {:?}",
-               request.incidents.len(), workspace_path);
+        let (agent, session_config) = self.agent_manager.create_agent(&session_id, &request.agent_config).await?;
 
-        // User Story 2 Achievement: Session is now managed by Goose SessionManager
-        // User Story 3: Will implement actual agent execution with streaming responses
-        info!("Request {} accepted with Goose session management", request_id);
 
-        // For User Story 2, we unlock the session as we're not actually processing yet
-        // User Story 3 will keep the lock during actual agent execution
-        if let Err(unlock_err) = self.agent_manager.unlock_session(&request.session_id).await {
+        let incident_messages: Vec<String> = request.incidents.iter().map(|i| i.message.clone()).collect();
+        let prompt = format!(
+            "Solve these migration issues in this application:{}{}",
+            if incident_messages.is_empty() { " (no incidents provided)" } else { "" },
+            if incident_messages.len() == 1 {
+                format!(" {}", incident_messages[0])
+            } else {
+                incident_messages
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, msg)| format!("\n  {}. {}", idx + 1, msg))
+                    .collect::<String>()
+            }
+        );
+
+        let message = Message::user().with_text(&prompt);
+
+        let mut stream = match agent.reply(message, session_config, None).await {
+            Ok(stream) => stream,
+            Err(e) => {
+                error!("Failed to reply to message: {}", e);
+                return Err(crate::KaiakError::agent(format!("Failed to reply to message: {}", e), None));
+            }
+        };
+
+        while let Some(event) = futures::StreamExt::next(&mut stream).await {
+            match event {
+                Ok(AgentEvent::Message(message)) => {
+                    println!("Message: {:?}", message);
+                    self.send_progress(notifier, &session_id, "Generating fix", 10, Some(serde_json::json!(message)));
+                },
+                Ok(AgentEvent::HistoryReplaced(history)) => {
+                    println!("History replaced: {:?}", history);
+                },
+                Ok(AgentEvent::McpNotification((_req_id, notif))) => {
+                    println!("Mcp notification: {:?}", notif);
+                },
+                Ok(AgentEvent::ModelChange { model, .. }) => {
+                    println!("Model change: {:?}", model);
+                },
+                Err(e) => {
+                    error!("Error getting stream event: {:?}", e);
+                }
+            }
+        }
+
+        if let Err(unlock_err) = self.agent_manager.unlock_session(&session_id).await {
             warn!("Failed to unlock session after preparation: {}", unlock_err);
         }
 
-        Ok(())
-    }
-
-    /// Estimate completion time based on incident count
-    fn estimate_completion_time(&self, incident_count: usize) -> Option<String> {
-        // Simple estimation: 30 seconds per incident + base time
-        let base_seconds = 60; // 1 minute base processing time
-        let per_incident_seconds = 30;
-        let total_seconds = base_seconds + (incident_count * per_incident_seconds);
-
-        let estimated_time = chrono::Utc::now() + chrono::Duration::seconds(total_seconds as i64);
-        Some(estimated_time.to_rfc3339())
+        Ok(session_id)
     }
 
     /// Cancel a generate fix request
@@ -272,12 +247,4 @@ impl GenerateFixHandler {
         let mut active = self.active_requests.write().await;
         Ok(active.remove(request_id).is_some())
     }
-}
-
-/// Custom validation function for UUID format
-fn validate_uuid_format(session_id: &str) -> Result<(), validator::ValidationError> {
-    if Uuid::parse_str(session_id).is_err() {
-        return Err(validator::ValidationError::new("invalid_uuid_format"));
-    }
-    Ok(())
 }
