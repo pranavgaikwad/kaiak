@@ -9,7 +9,7 @@ use tokio::net::UnixStream;
 use tracing::{debug, trace};
 use uuid::Uuid;
 
-use crate::jsonrpc::{JsonRpcRequest, JsonRpcResponse, JsonRpcError, JsonRpcNotification};
+use crate::jsonrpc::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 
 /// Client information for debugging and tracing
 #[derive(Debug, Clone, Serialize, Deserialize)]

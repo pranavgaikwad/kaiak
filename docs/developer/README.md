@@ -57,100 +57,80 @@ EOF
 chmod +x .git/hooks/pre-commit
 ```
 
-### Environment Configuration
-
-Set up development environment variables:
-
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-export RUST_LOG=kaiak=debug
-export KAIAK_DEV_MODE=true
-
-# For testing with AI providers (optional)
-export OPENAI_API_KEY="sk-test-key"  # Use test keys for development
-```
-
 ## Project Architecture
 
 ### High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    IDE Clients                               │
-│  (VSCode, IntelliJ, Vim, Emacs)                             │
+│                      Clients                                 │
+│  • IDE Extensions (stdio)  • CLI Client (Unix socket)       │
 └─────────────────┬───────────────────────────────────────────┘
-                  │ JSON-RPC over LSP transport
+                  │ JSON-RPC 2.0 over LSP transport
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                 Transport Layer                              │
-│  • stdio (primary)  • Unix sockets (fallback)              │
+│  • StdioTransport  • IpcTransport (Unix sockets)            │
 └─────────────────┬───────────────────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              JSON-RPC Protocol Layer                        │
-│  • Method routing  • Request validation  • Response format  │
+│              JSON-RPC Server                                 │
+│  • Method routing  • Streaming notifications  • Error codes │
 └─────────────────┬───────────────────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                Handler Layer                                 │
-│  • FixGenerationHandler  • LifecycleHandler                │
-│  • StreamingHandler      • InteractionHandler              │
-└─────────────┬───────────────────┬───────────────────────────┘
-              │                   │
-              ▼                   ▼
-┌─────────────────────┐ ┌─────────────────────┐
-│   Session Manager   │ │   Security Layer    │
-│  • LRU Cache        │ │  • File Validation  │
-│  • Lifecycle Mgmt   │ │  • Approval Flow    │
-│  • Performance Opt  │ │  • Path Sanitization│
-└─────────┬───────────┘ └─────────────────────┘
-          │
-          ▼
+│  • GenerateFixHandler (streaming)                           │
+│  • DeleteSessionHandler                                     │
+└─────────────┬───────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Agent Manager                                   │
+│  • Session creation  • Agent lifecycle  • Event streaming   │
+└─────────────────┬───────────────────────────────────────────┘
+                  │
+                  ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                 Goose Integration                            │
-│  • Agent Manager  • Tool Execution  • Context Management   │
+│  • Goose Agent  • Tool Execution  • AI Model Integration    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Core Components
 
-#### 1. Server Module (`src/server/`)
+#### 1. JSON-RPC Module (`src/jsonrpc/`)
 
-- **`transport.rs`**: IPC transport implementations (stdio, sockets)
-- **`jsonrpc.rs`**: JSON-RPC 2.0 protocol handling
-- **`server.rs`**: Main server orchestration and LSP integration
+- **`protocol.rs`**: Core JSON-RPC 2.0 types (Request, Response, Notification, Error)
+- **`transport.rs`**: Transport trait and implementations (stdio, Unix sockets)
+- **`server.rs`**: JSON-RPC server with method registration and streaming support
+- **`methods.rs`**: Method constants and registration helpers
+- **`core.rs`**: Kaiak-specific request/response wrappers
 
 #### 2. Handlers Module (`src/handlers/`)
 
-- **`fix_generation.rs`**: Core fix generation workflow
-- **`lifecycle.rs`**: Session and agent lifecycle management
-- **`streaming.rs`**: Real-time progress and message streaming
-- **`interactions.rs`**: User interaction and approval handling
-- **`modifications.rs`**: File modification proposal management
+- **`generate_fix.rs`**: Core fix generation with streaming notifications
+- **`delete_session.rs`**: Session cleanup and resource management
 
-#### 3. Goose Module (`src/goose/`)
+#### 3. Agent Module (`src/agent/`)
 
-- **`agent.rs`**: Goose agent lifecycle and communication
-- **`session.rs`**: Session management with performance optimizations
-- **`monitoring.rs`**: Performance monitoring and metrics
-- **`resources.rs`**: Resource management and cleanup
+- **`mod.rs`**: GooseAgentManager for agent lifecycle and session coordination
 
 #### 4. Models Module (`src/models/`)
 
-- **`session.rs`**: Session and configuration data structures
-- **`request.rs`**: Fix generation request models
-- **`incident.rs`**: Code incident and issue representations
-- **`messages.rs`**: Stream message types and content
-- **`proposal.rs`**: File modification proposal structures
-- **`interaction.rs`**: User interaction data models
+- **`configuration.rs`**: ServerConfig, BaseConfig, AgentConfig with hierarchy support
+- **`incidents.rs`**: MigrationIncident representations
 
-#### 5. Config Module (`src/config/`)
+#### 5. Client Module (`src/client/`)
 
-- **`settings.rs`**: Configuration structures and loading
-- **`security.rs`**: Security policies and validation
-- **`validation.rs`**: Comprehensive configuration validation
+- **`transport.rs`**: JSON-RPC client for Unix socket communication
+- **`mod.rs`**: Client exports (JsonRpcClient, ConnectionState)
+
+#### 6. Server Module (`src/server/`)
+
+- **`server.rs`**: High-level server startup and orchestration
 
 ## Code Organization
 
@@ -158,11 +138,12 @@ export OPENAI_API_KEY="sk-test-key"  # Use test keys for development
 
 ```rust
 // src/lib.rs - Main library exports and error types
-pub mod config;     // Configuration management
-pub mod server;     // Server implementation
-pub mod goose;      // Goose agent integration
-pub mod models;     // Data models
+pub mod jsonrpc;    // JSON-RPC protocol and server
+pub mod server;     // High-level server orchestration
+pub mod agent;      // Goose agent integration
+pub mod models;     // Data models and configuration
 pub mod handlers;   // Request handlers
+pub mod client;     // Client-side transport
 
 // Common error type used throughout
 pub type KaiakResult<T> = Result<T, KaiakError>;
@@ -399,27 +380,52 @@ impl NewFeatureHandler {
 }
 ```
 
-#### Step 4: Add JSON-RPC Methods
+#### Step 4: Register JSON-RPC Method
 
 ```rust
-// src/server/jsonrpc.rs
-pub mod methods {
-    pub const NEW_FEATURE_METHOD: &str = "kaiak/feature/action";
-}
+// src/jsonrpc/methods.rs - Add method constant
+pub const NEW_FEATURE: &str = "kaiak/new_feature";
 
-// In server implementation
-async fn handle_new_feature_request(&self, params: Value, id: RequestId) -> JsonRpcResult<Value> {
-    let request: NewFeatureRequest = serde_json::from_value(params)
-        .map_err(|e| create_error(error_codes::INVALID_PARAMS, &e.to_string(), None))?;
-
-    let handler = self.new_feature_handler.read().await;
-    let result = handler.as_ref()
-        .ok_or_else(|| create_error(error_codes::INTERNAL_ERROR, "Handler not initialized", None))?
-        .handle_request(request)
-        .await
-        .map_err(|e| create_error(e.error_code(), &e.to_string(), None))?;
-
-    Ok(serde_json::to_value(result).unwrap())
+// src/jsonrpc/mod.rs - Register method with server
+pub async fn register_kaiak_methods(
+    server: &JsonRpcServer,
+    // ... dependencies
+) -> anyhow::Result<()> {
+    // For non-streaming methods
+    server.register_async_method(
+        NEW_FEATURE.to_string(),
+        move |params| {
+            async move {
+                let request: NewFeatureRequest = serde_json::from_value(
+                    params.unwrap_or(serde_json::Value::Null)
+                ).map_err(|e| JsonRpcError::custom(
+                    error_codes::INVALID_PARAMS,
+                    format!("Failed to parse parameters: {}", e),
+                    None,
+                ))?;
+                
+                // Handle request...
+                Ok(serde_json::to_value(response)?)
+            }
+        },
+    ).await?;
+    
+    // For streaming methods (sends notifications during execution)
+    server.register_streaming_method(
+        NEW_FEATURE.to_string(),
+        move |params, notifier| {
+            async move {
+                // Use notifier.send() to send progress notifications
+                notifier.send(JsonRpcNotification::new(
+                    "kaiak/newFeature/progress",
+                    Some(serde_json::json!({"stage": "started"})),
+                ))?;
+                
+                // Handle request...
+                Ok(serde_json::to_value(response)?)
+            }
+        },
+    ).await?;
 }
 ```
 
