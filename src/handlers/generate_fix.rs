@@ -223,10 +223,10 @@ impl GenerateFixHandler {
                 Ok(AgentEvent::HistoryReplaced(history)) => {
                     println!("History replaced: {:?}", history);
                 },
-                Ok(AgentEvent::McpNotification((req_id, notif))) => {
+                Ok(AgentEvent::McpNotification((_req_id, notif))) => {
                     println!("Mcp notification: {:?}", notif);
                 },
-                Ok(AgentEvent::ModelChange { model, mode }) => {
+                Ok(AgentEvent::ModelChange { model, .. }) => {
                     println!("Model change: {:?}", model);
                 },
                 Err(e) => {

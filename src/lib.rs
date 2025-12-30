@@ -5,8 +5,6 @@
 
 use anyhow::Result;
 
-// Re-export commonly used types
-pub use models::session::SessionManager;
 
 pub mod server;
 pub mod models;
