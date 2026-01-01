@@ -232,6 +232,126 @@ impl JsonRpcClient {
         self.call(request, on_notification).await
     }
 
+    /// Send a notification to the server (no response expected)
+    ///
+    /// Sends a JSON-RPC notification that doesn't expect a response.
+    /// This is used for client-to-server communications like user input.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let params = serde_json::json!({
+    ///     "session_id": "goose-session-123",
+    ///     "message_type": "user_input",
+    ///     "timestamp": "2025-01-01T10:30:00Z",
+    ///     "payload": {"text": "Yes, proceed"}
+    /// });
+    /// client.send_notification("kaiak/client/user_message", params).await?;
+    /// ```
+    pub async fn send_notification(&self, method: &str, params: Value) -> Result<()> {
+        self.send_notification_with_retry(method, params, 3).await
+    }
+
+    /// Send a notification with retry logic and exponential backoff
+    ///
+    /// Retries connection failures with exponential backoff: 100ms, 500ms, 2s
+    /// Maximum of 3 attempts by default.
+    pub async fn send_notification_with_retry(&self, method: &str, params: Value, max_retries: usize) -> Result<()> {
+        let notification = JsonRpcNotification::new(
+            method.to_string(),
+            Some(params),
+        );
+
+        let notification_json = serde_json::to_string(&notification)
+            .map_err(|e| anyhow!("Failed to serialize notification: {}", e))?;
+
+        let message = format!("Content-Length: {}\r\n\r\n{}", notification_json.len(), notification_json);
+
+        let mut attempt = 0;
+        let mut last_error = None;
+
+        while attempt < max_retries {
+            attempt += 1;
+
+            match self.try_send_notification(&message).await {
+                Ok(()) => {
+                    debug!("Notification sent successfully on attempt {}", attempt);
+                    return Ok(());
+                }
+                Err(e) => {
+                    last_error = Some(e);
+
+                    if attempt < max_retries {
+                        // Exponential backoff: 100ms, 500ms, 2000ms
+                        let delay_ms = match attempt {
+                            1 => 100,
+                            2 => 500,
+                            _ => 2000,
+                        };
+
+                        debug!("Connection failed on attempt {}, retrying in {}ms...", attempt, delay_ms);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+
+        // All retries failed
+        let final_error = last_error.unwrap_or_else(|| anyhow!("Unknown error"));
+        Err(anyhow!("Failed to send notification after {} attempts: {}", max_retries, final_error))
+    }
+
+    /// Try to send a notification once (helper for retry logic)
+    async fn try_send_notification(&self, message: &str) -> Result<()> {
+        let stream = UnixStream::connect(&self.socket_path)
+            .await
+            .map_err(|e| anyhow!("Failed to connect to socket {}: {}", self.socket_path, e))?;
+
+        let (_, mut write_half) = stream.into_split();
+
+        debug!("Sending notification: {}", message.trim_end());
+
+        write_half.write_all(message.as_bytes()).await
+            .map_err(|e| anyhow!("Failed to write notification: {}", e))?;
+        write_half.flush().await
+            .map_err(|e| anyhow!("Failed to flush: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Send a user message notification to the server
+    ///
+    /// Convenience method for sending user input notifications.
+    ///
+    /// # Arguments
+    /// * `session_id` - The target session ID for routing
+    /// * `message_type` - Type of message ("user_input" or "control_signal")
+    /// * `payload` - Optional JSON payload containing the actual message
+    ///
+    /// # Example
+    /// ```ignore
+    /// use serde_json::json;
+    ///
+    /// let payload = json!({"text": "Yes, proceed with the changes"});
+    /// client.send_user_message("session-123", "user_input", Some(payload)).await?;
+    /// ```
+    pub async fn send_user_message(
+        &self,
+        session_id: &str,
+        message_type: &str,
+        payload: Option<Value>,
+    ) -> Result<()> {
+        use chrono::Utc;
+
+        let params = serde_json::json!({
+            "session_id": session_id,
+            "message_type": message_type,
+            "timestamp": Utc::now().to_rfc3339(),
+            "payload": payload
+        });
+
+        self.send_notification("kaiak/client/user_message", params).await
+    }
+
     /// Get socket path
     pub fn socket_path(&self) -> &str {
         &self.socket_path

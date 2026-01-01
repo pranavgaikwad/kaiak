@@ -22,9 +22,9 @@
 
 **Purpose**: Project initialization and validation
 
-- [ ] T001 Validate existing Kaiak JSON-RPC infrastructure in src/jsonrpc/protocol.rs
-- [ ] T002 [P] Verify existing socket transport capabilities in src/client/transport.rs
-- [ ] T003 [P] Review existing session management integration points
+- [x] T001 Validate existing Kaiak JSON-RPC infrastructure in src/jsonrpc/protocol.rs
+- [x] T002 [P] Verify existing socket transport capabilities in src/client/transport.rs
+- [x] T003 [P] Review existing session management integration points
 
 ---
 
@@ -34,10 +34,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Create client notification handler structure in src/handlers/client_notifications.rs
-- [ ] T005 Register kaiak/client/user_message method in src/jsonrpc/methods.rs
-- [ ] T006 Update handler module exports in src/handlers/mod.rs
-- [ ] T007 Implement notification validation framework using existing JSON-RPC error patterns
+- [x] T004 Create client notification handler structure in src/handlers/client_notifications.rs
+- [x] T005 Register kaiak/client/user_message method in src/jsonrpc/methods.rs
+- [x] T006 Update handler module exports in src/handlers/mod.rs
+- [x] T007 Implement notification validation framework using existing JSON-RPC error patterns
 
 **Checkpoint**: Foundation ready - user story implementation can now begin
 
@@ -49,15 +49,15 @@
 
 ### Implementation for User Story 1
 
-- [ ] T008 [P] [US1] Extend JsonRpcClient in src/client/transport.rs to add send_notification method
-- [ ] T009 [P] [US1] Implement notification parameter validation in src/handlers/client_notifications.rs
-- [ ] T010 [US1] Add client notification handler to JSON-RPC server in src/jsonrpc/server.rs
-- [ ] T011 [US1] Implement session ID validation using existing agent session management
-- [ ] T012 [US1] Add notification size validation (1MB)
-- [ ] T013 [US1] Implement retry queue and exponential backoff for connection failures
-- [ ] T015 [US1] Add comprehensive error handling for all validation scenarios
-- [ ] T016 [US1] Add logging for client notification operations using existing patterns
-- [ ] T017 [US1] Create integration test for client-to-server notification flow in tests/integration/
+- [x] T008 [P] [US1] Extend JsonRpcClient in src/client/transport.rs to add send_notification method
+- [x] T009 [P] [US1] Implement notification parameter validation in src/handlers/client_notifications.rs
+- [x] T010 [US1] Add client notification handler to JSON-RPC server in src/jsonrpc/server.rs
+- [x] T011 [US1] Implement session ID validation using existing agent session management
+- [x] T012 [US1] Add notification size validation (1MB)
+- [x] T013 [US1] Implement retry queue and exponential backoff for connection failures
+- [x] T015 [US1] Add comprehensive error handling for all validation scenarios
+- [x] T016 [US1] Add logging for client notification operations using existing patterns
+- [x] T017 [US1] Create integration test for client-to-server notification flow in tests/integration/ (SKIPPED - Tests optional)
 
 **Checkpoint**: At this point, User Story 1 should be fully functional - clients can send notifications to server with validation
 
@@ -67,10 +67,10 @@
 
 **Purpose**: Improvements and final validation
 
-- [ ] T018 [P] Validate quickstart.md examples work with implemented notification system
-- [ ] T020 Code cleanup and ensure consistent error message formats
-- [ ] T022 Security review of notification validation and session handling
-- [ ] T023 Documentation update to add the new notification type
+- [x] T018 [P] Validate quickstart.md examples work with implemented notification system
+- [x] T020 Code cleanup and ensure consistent error message formats
+- [x] T022 Security review of notification validation and session handling
+- [x] T023 Documentation update to add the new notification type
 
 ---
 

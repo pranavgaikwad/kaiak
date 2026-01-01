@@ -28,12 +28,13 @@ Content-Length: {byte_length}\r\n
 
 ## API Methods
 
-Kaiak exposes two methods:
+Kaiak exposes three methods:
 
 | Method | Description | Streaming |
 |--------|-------------|-----------|
 | `kaiak/generate_fix` | Generate fixes for migration incidents | Yes |
 | `kaiak/delete_session` | Clean up agent session | No |
+| `kaiak/client/user_message` | Send client notifications to server | No |
 
 ---
 
@@ -196,6 +197,106 @@ Delete an agent session and clean up associated resources.
     }
   },
   "id": 2
+}
+```
+
+---
+
+## 3. kaiak/client/user_message
+
+Send a notification from client to server for validation and routing. This method allows clients to send user input and control signals back to the server during agent processing.
+
+### Request (as Notification)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "kaiak/client/user_message",
+  "params": {
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "message_type": "user_input",
+    "timestamp": "2025-01-01T10:30:00Z",
+    "payload": {
+      "text": "Yes, proceed with the suggested changes",
+      "context": "approval_request"
+    }
+  }
+}
+```
+
+**Note**: This can be sent either as a notification (no `id` field) or as a request (with `id` field). When sent as a notification, no response is expected.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `session_id` | string | Yes | Session identifier (must exist and be active) |
+| `message_type` | string | Yes | Message type: `user_input` or `control_signal` |
+| `timestamp` | string | Yes | ISO 8601 timestamp (within 24 hours of current time) |
+| `payload` | object | No | Optional JSON payload (max 1MB) |
+
+#### Message Types
+
+- **`user_input`**: User responses, approvals, or text input (requires non-null payload)
+- **`control_signal`**: Control commands like pause, resume, cancel
+
+#### Validation Rules
+
+- **Payload**: Maximum 1MB when serialized
+- **Message Type**: Must be from allowed list
+
+### Response (if sent as request)
+
+```json
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "success": true,
+    "message": "Notification received and validated",
+    "notification_id": "notif-550e8400-e29b-41d4-a716-446655440001"
+  },
+  "id": 3
+}
+```
+
+### Response (Error Examples)
+
+#### Invalid Session
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Session ID 'invalid-session' not found or invalid"
+  },
+  "id": 3
+}
+```
+
+#### Payload Too Large
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Notification payload exceeds 1MB size limit"
+  },
+  "id": 3
+}
+```
+
+#### Invalid Message Type
+
+```json
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32602,
+    "message": "Validation failed: Message type must be 'user_input' or 'control_signal'"
+  },
+  "id": 3
 }
 ```
 
@@ -404,7 +505,8 @@ kaiak disconnect
 - Session IDs are **optional** - server creates new sessions if not provided
 - Use the `session_id` from responses to continue sessions or clean up
 - Only one client can use a session at a time
-- Server can receive notifications from clients (messages without `id` field)
+- Server can receive notifications from clients via `kaiak/client/user_message`
+- Client notifications support automatic retry with exponential backoff for connection failures
 
 ---
 
@@ -439,6 +541,15 @@ async fn main() -> anyhow::Result<()> {
     let session_id = result["session_id"].as_str().unwrap();
     println!("Session ID: {}", session_id);
     println!("Result: {}", serde_json::to_string_pretty(&result)?);
+
+    // Example: Send a client notification
+    client.send_user_message(
+        session_id,
+        "user_input",
+        Some(serde_json::json!({"text": "Yes, proceed with changes"}))
+    ).await?;
+    println!("User notification sent successfully");
+
     Ok(())
 }
 ```

@@ -106,6 +106,10 @@ impl GooseAgentManager {
         removed_agent
     }
 
+    pub async fn session_exists(&self, session_id: &str) -> bool {
+        self.session_wrapper.session_exists(session_id).await
+    }
+
     async fn setup_model_provider(&self, agent: &Agent, config: &AgentConfig) -> KaiakResult<()> {
         use tracing::{debug, info, error};
         use goose::providers::create_with_named_model;

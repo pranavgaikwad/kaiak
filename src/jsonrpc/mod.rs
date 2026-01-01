@@ -25,7 +25,7 @@ pub use server::{
     StreamingMethodHandler, NotificationSender, NotificationReceiver,
 };
 
-pub use methods::{GENERATE_FIX, DELETE_SESSION};
+pub use methods::{GENERATE_FIX, DELETE_SESSION, CLIENT_USER_MESSAGE};
 pub use core::{KaiakRequest, KaiakResponse, ResponseMetadata};
 
 pub const JSONRPC_VERSION: &str = "2.0";
@@ -79,6 +79,7 @@ pub async fn register_kaiak_methods(
     use crate::handlers::{
         generate_fix::{GenerateFixRequest, GenerateFixHandler},
         delete_session::{DeleteSessionRequest, DeleteSessionHandler},
+        client_notifications::{ClientNotificationRequest, ClientNotificationHandler},
     };
     
     // Register generate_fix method (streaming - sends notifications during execution)
@@ -146,7 +147,39 @@ pub async fn register_kaiak_methods(
         ).await?;
     }
 
-    tracing::info!("Registered {} Kaiak JSON-RPC methods", 2);
+    // Register client_user_message method (non-streaming, for client notifications)
+    {
+        let agent_manager = agent_manager.clone();
+        server.register_async_method(
+            CLIENT_USER_MESSAGE.to_string(),
+            move |params| {
+                let agent_manager = agent_manager.clone();
+                async move {
+                    let params_value = params.unwrap_or(serde_json::Value::Null);
+
+                    // Parse directly as ClientNotificationRequest (no wrapper)
+                    let request: ClientNotificationRequest = serde_json::from_value(params_value.clone())
+                        .map_err(|e| {
+                            create_parse_error::<ClientNotificationRequest>(&e, &params_value)
+                        })?;
+
+                    let handler = ClientNotificationHandler::new(agent_manager.clone());
+                    let response = handler.handle_notification(request).await
+                        .map_err(|e| crate::jsonrpc::JsonRpcError::from(e))?;
+
+                    // Return raw response (no wrapper)
+                    serde_json::to_value(response)
+                        .map_err(|e| crate::jsonrpc::JsonRpcError::custom(
+                            crate::jsonrpc::protocol::error_codes::INTERNAL_ERROR,
+                            format!("Failed to serialize response: {}", e),
+                            None,
+                        ))
+                }
+            },
+        ).await?;
+    }
+
+    tracing::info!("Registered {} Kaiak JSON-RPC methods", 3);
     Ok(())
 }
 
