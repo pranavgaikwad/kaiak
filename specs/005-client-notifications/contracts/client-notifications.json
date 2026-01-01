@@ -1,0 +1,184 @@
+{
+  "jsonrpc": "2.0",
+  "info": {
+    "title": "Kaiak Client Notifications API",
+    "version": "1.0.0",
+    "description": "JSON-RPC methods for client-to-server notifications in Kaiak"
+  },
+  "methods": {
+    "kaiak/client/user_message": {
+      "description": "Send a user message notification from client to server",
+      "params": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "description": "ID of the target agent session for routing validation",
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "message_type": {
+            "type": "string",
+            "description": "Type of message being sent",
+            "enum": ["user_input", "control_signal"],
+            "default": "user_input"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when notification was created"
+          },
+          "payload": {
+            "type": "object",
+            "description": "Unstructured JSON containing the message data",
+            "additionalProperties": true,
+            "maxProperties": 50
+          }
+        },
+        "required": ["session_id", "message_type", "timestamp"],
+        "additionalProperties": false,
+        "maxSize": "1MB"
+      },
+      "result": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the notification was received and validated"
+          },
+          "message": {
+            "type": "string",
+            "description": "Success or error message"
+          },
+          "notification_id": {
+            "type": "string",
+            "description": "Unique identifier for this notification (for tracking)"
+          }
+        },
+        "required": ["success", "message"]
+      },
+      "errors": [
+        {
+          "code": -32700,
+          "message": "Parse error",
+          "description": "Invalid JSON-RPC format or malformed notification"
+        },
+        {
+          "code": -32600,
+          "message": "Invalid Request",
+          "description": "Size limit exceeded or rate limit exceeded"
+        },
+        {
+          "code": -32602,
+          "message": "Invalid params",
+          "description": "Missing required fields or invalid session ID"
+        },
+        {
+          "code": -32603,
+          "message": "Internal error",
+          "description": "Server error processing notification"
+        }
+      ]
+    }
+  },
+  "examples": {
+    "user_input_notification": {
+      "request": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/client/user_message",
+        "params": {
+          "session_id": "goose-session-abc123",
+          "message_type": "user_input",
+          "timestamp": "2025-12-30T10:30:00Z",
+          "payload": {
+            "text": "Yes, proceed with the changes",
+            "context": "approval_request",
+            "user_id": "dev_user_1"
+          }
+        },
+        "id": null
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "result": {
+          "success": true,
+          "message": "Notification received and validated",
+          "notification_id": "notif-def456"
+        },
+        "id": null
+      }
+    },
+    "control_signal_notification": {
+      "request": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/client/user_message",
+        "params": {
+          "session_id": "goose-session-xyz789",
+          "message_type": "control_signal",
+          "timestamp": "2025-12-30T10:35:00Z",
+          "payload": {
+            "action": "pause",
+            "reason": "user_requested"
+          }
+        },
+        "id": null
+      },
+      "response": {
+        "jsonrpc": "2.0",
+        "result": {
+          "success": true,
+          "message": "Control signal received",
+          "notification_id": "notif-ghi789"
+        },
+        "id": null
+      }
+    },
+    "invalid_session_error": {
+      "request": {
+        "jsonrpc": "2.0",
+        "method": "kaiak/client/user_message",
+        "params": {
+          "session_id": "invalid-session",
+          "message_type": "user_input",
+          "timestamp": "2025-12-30T10:30:00Z",
+          "payload": {
+            "text": "Some message"
+          }
+        },
+        "id": null
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "error": {
+          "code": -32602,
+          "message": "Session ID 'invalid-session' not found or invalid"
+        },
+        "id": null
+      }
+    }
+  },
+  "transport": {
+    "protocols": ["unix-socket"],
+    "framing": "LSP-style Content-Length headers",
+    "encoding": "UTF-8",
+    "connectionTypes": ["bidirectional"],
+    "reconnection": {
+      "enabled": true,
+      "maxRetries": 3,
+      "backoffStrategy": "exponential",
+      "initialDelay": "100ms",
+      "maxDelay": "2s"
+    }
+  },
+  "security": {
+    "validation": "JSON-RPC format validation and size limits",
+    "rateLimiting": "Per-client token bucket algorithm",
+    "sessionValidation": "Verify session exists in agent manager",
+    "payloadLimits": {
+      "maxSize": "1MB",
+      "maxDepth": 10,
+      "maxProperties": 50
+    }
+  }
+}
