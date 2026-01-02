@@ -111,21 +111,9 @@
       ```
 
 - Run speckit.tasks
-   - Added some additional context during generating models:
-      ```md
-      - Remove max_file_size from workspace config
-      - many of the ModelConfig fields will be passed by the IDE which we will simply pass on to GOose. so can we just re-use Goose's model config instead? 
-      - For the permission config, i think we should keep a single hashmap that stores permissions for each tool, the permissions could be an enum. refer to existing api for reference.
-      - Migration incident type only needs rule_id, id, message, description, effort, severity, fields no other fields are needed
-      - Remove risk_assessment from InteractionContext
-      - GenerateFixResponse doesn't look right. didnt we decide to wait when generate_fix is called until agent finishes. So it doesn't make sense to have estimated_duration. instead, a completed_at field would be better.
-
-      ```
 
 - Run speckit.analyze
 
 - Run speckit.implement
 
-
-### Follow up fixes / addressing review
 

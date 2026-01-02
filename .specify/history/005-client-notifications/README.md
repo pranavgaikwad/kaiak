@@ -19,15 +19,9 @@
 - Run speckit.plan to generate a technical plan
 
 - Run speckit.tasks
-   - Added some additional context during generating models:
-      ```md
-
-      ```
 
 - Run speckit.analyze
 
 - Run speckit.implement
 
-
-### Follow up fixes / addressing review
 
