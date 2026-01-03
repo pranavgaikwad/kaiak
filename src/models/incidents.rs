@@ -3,17 +3,14 @@ use validator::Validate;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Validate)]
 pub struct MigrationIncident {
-    #[validate(length(min = 1, max = 255, message = "Incident ID must be between 1 and 255 characters"))]
     pub id: String,
-    #[validate(length(min = 1, max = 255, message = "Rule ID must be between 1 and 255 characters"))]
-    pub rule_id: String,
-    #[validate(length(min = 1, max = 1000, message = "Message must be between 1 and 1000 characters"))]
+    pub uri: String,
     pub message: String,
-    #[validate(length(max = 5000, message = "Description must not exceed 5000 characters"))]
     pub description: String,
-    #[validate(length(max = 100, message = "Effort must not exceed 100 characters"))]
-    pub effort: String,
-    pub severity: IncidentSeverity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<IncidentSeverity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -44,22 +41,40 @@ impl std::fmt::Display for IncidentSeverity {
 
 impl std::fmt::Display for MigrationIncident {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {} - {}", self.severity, self.rule_id, self.message)
+        let severity = self.severity.as_ref().map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_string());
+        write!(f, "[{}] {} - {}", severity, self.id, self.message)
     }
 }
 
 impl MigrationIncident {
     pub fn new(
         id: String,
-        rule_id: String,
+        uri: String,
         message: String,
         description: String,
-        effort: String,
-        severity: IncidentSeverity,
     ) -> Self {
         Self {
             id,
-            rule_id,
+            uri,
+            message,
+            description,
+            effort: None,
+            severity: None,
+        }
+    }
+
+    /// Create a new incident with all optional fields
+    pub fn with_details(
+        id: String,
+        uri: String,
+        message: String,
+        description: String,
+        effort: Option<String>,
+        severity: Option<IncidentSeverity>,
+    ) -> Self {
+        Self {
+            id,
+            uri,
             message,
             description,
             effort,
@@ -79,15 +94,31 @@ mod tests {
     fn test_incident_creation() {
         let incident = MigrationIncident::new(
             "test-id".to_string(),
-            "deprecated-api".to_string(),
+            "file:///path/to/file.java".to_string(),
             "Use of deprecated API".to_string(),
             "This API has been deprecated".to_string(),
-            "trivial".to_string(),
-            IncidentSeverity::Warning,
         );
 
         assert_eq!(incident.id, "test-id");
-        assert_eq!(incident.severity, IncidentSeverity::Warning);
+        assert_eq!(incident.uri, "file:///path/to/file.java");
+        assert_eq!(incident.severity, None);
+        assert_eq!(incident.effort, None);
+    }
+
+    #[test]
+    fn test_incident_with_details() {
+        let incident = MigrationIncident::with_details(
+            "test-id".to_string(),
+            "file:///path/to/file.java".to_string(),
+            "Use of deprecated API".to_string(),
+            "This API has been deprecated".to_string(),
+            Some("trivial".to_string()),
+            Some(IncidentSeverity::Warning),
+        );
+
+        assert_eq!(incident.id, "test-id");
+        assert_eq!(incident.severity, Some(IncidentSeverity::Warning));
+        assert_eq!(incident.effort, Some("trivial".to_string()));
     }
 
     #[test]
@@ -108,15 +139,27 @@ mod tests {
 
     #[test]
     fn test_incident_display() {
-        let incident = MigrationIncident::new(
+        let incident = MigrationIncident::with_details(
             "id1".to_string(),
-            "rule1".to_string(),
+            "file:///path/to/file.java".to_string(),
             "Test message".to_string(),
             "Description".to_string(),
-            "trivial".to_string(),
-            IncidentSeverity::Warning,
+            None,
+            Some(IncidentSeverity::Warning),
         );
 
-        assert_eq!(incident.to_string(), "[warning] rule1 - Test message");
+        assert_eq!(incident.to_string(), "[warning] id1 - Test message");
+    }
+
+    #[test]
+    fn test_incident_display_no_severity() {
+        let incident = MigrationIncident::new(
+            "id1".to_string(),
+            "file:///path/to/file.java".to_string(),
+            "Test message".to_string(),
+            "Description".to_string(),
+        );
+
+        assert_eq!(incident.to_string(), "[unknown] id1 - Test message");
     }
 }

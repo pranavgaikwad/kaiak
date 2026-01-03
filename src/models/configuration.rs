@@ -48,6 +48,7 @@ pub struct BaseConfig {
     pub model: ModelConfig,
     // We maintain a map of tool names to their permission levels
     // TODO (pgaikwad): Deep dive into smart permission settings
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub tool_permissions: HashMap<String, PermissionLevel>,
 }
 
@@ -56,8 +57,11 @@ pub struct BaseConfig {
 pub struct AgentConfig {
     #[validate(custom(function = "validate_workspace_path"))]
     pub workspace: PathBuf,
-    pub session: GooseSessionConfig,
+    /// Session configuration - initialized by the system
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<GooseSessionConfig>,
     /// override_base_config completely overrides server's base_config
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(nested)]
     pub override_base_config: Option<BaseConfig>,
 }
@@ -94,12 +98,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             workspace: PathBuf::from("."),
-            session: GooseSessionConfig {
-                id: uuid::Uuid::new_v4().to_string(),
-                schedule_id: None,
-                max_turns: Some(1000),
-                retry_config: None,
-            },
+            session: None,
             override_base_config: Some(BaseConfig::default()),
         }
     }
@@ -123,37 +122,6 @@ impl Default for ModelConfig {
             temperature: Some(0.01),
             max_tokens: None,
         }
-    }
-}
-
-impl AgentConfig {
-    /// Validate and optionally generate a new session ID if none provided
-    pub fn ensure_valid_session_id(&mut self) -> Result<(), String> {
-        // If session ID is empty, generate a new one
-        if self.session.id.is_empty() {
-            self.session.id = uuid::Uuid::new_v4().to_string();
-            return Ok(());
-        }
-
-        // Validate the provided session ID is a valid UUID
-        match uuid::Uuid::parse_str(&self.session.id) {
-            Ok(_) => Ok(()),
-            Err(_) => Err(format!(
-                "Invalid UUID format for session ID: {}",
-                self.session.id
-            )),
-        }
-    }
-
-    /// Create a new configuration with a specific session ID
-    pub fn with_session_id(session_id: String) -> Result<Self, String> {
-        // Validate session ID is a proper UUID
-        uuid::Uuid::parse_str(&session_id)
-            .map_err(|_| format!("Invalid UUID format for session ID: {}", session_id))?;
-
-        let mut config = Self::default();
-        config.session.id = session_id;
-        Ok(config)
     }
 }
 
