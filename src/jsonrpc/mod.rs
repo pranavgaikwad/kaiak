@@ -80,15 +80,23 @@ pub async fn register_kaiak_methods(
         generate_fix::{GenerateFixRequest, GenerateFixHandler},
         delete_session::{DeleteSessionRequest, DeleteSessionHandler},
         client_notifications::{ClientNotificationRequest, ClientNotificationHandler},
+        InteractionManager,
     };
+
+    // Create shared interaction manager for coordinating user interactions
+    // This is shared between GenerateFixHandler (which waits for responses)
+    // and ClientNotificationHandler (which receives responses from clients)
+    let interaction_manager = std::sync::Arc::new(InteractionManager::new());
     
     // Register generate_fix method (streaming - sends notifications during execution)
     {
         let agent_manager = agent_manager.clone();
+        let interaction_manager = interaction_manager.clone();
         server.register_streaming_method(
             GENERATE_FIX.to_string(),
             move |params, notifier| {
                 let agent_manager = agent_manager.clone();
+                let interaction_manager = interaction_manager.clone();
                 let base_config = base_config.clone();
                 async move {
                     let params_value = params.unwrap_or(serde_json::Value::Null);
@@ -99,7 +107,7 @@ pub async fn register_kaiak_methods(
                             create_parse_error::<GenerateFixRequest>(&e, &params_value)
                         })?;
 
-                    let handler = GenerateFixHandler::new(agent_manager, base_config.clone());
+                    let handler = GenerateFixHandler::new(agent_manager, interaction_manager, base_config.clone());
                     let response = handler.handle_generate_fix(request, notifier).await
                         .map_err(|e| crate::jsonrpc::JsonRpcError::from(e))?;
 
@@ -148,12 +156,15 @@ pub async fn register_kaiak_methods(
     }
 
     // Register client_user_message method (non-streaming, for client notifications)
+    // This handles responses to user interactions (tool confirmations, elicitations)
     {
         let agent_manager = agent_manager.clone();
+        let interaction_manager = interaction_manager.clone();
         server.register_async_method(
             CLIENT_USER_MESSAGE.to_string(),
             move |params| {
                 let agent_manager = agent_manager.clone();
+                let interaction_manager = interaction_manager.clone();
                 async move {
                     let params_value = params.unwrap_or(serde_json::Value::Null);
 
@@ -163,7 +174,7 @@ pub async fn register_kaiak_methods(
                             create_parse_error::<ClientNotificationRequest>(&e, &params_value)
                         })?;
 
-                    let handler = ClientNotificationHandler::new(agent_manager.clone());
+                    let handler = ClientNotificationHandler::new(agent_manager, interaction_manager);
                     let response = handler.handle_notification(request).await
                         .map_err(|e| crate::jsonrpc::JsonRpcError::from(e))?;
 

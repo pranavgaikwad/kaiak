@@ -68,7 +68,7 @@ impl GooseSessionWrapper {
         // Create Goose session - Goose will generate its own session ID
         debug!("Creating Goose session with working_dir: {:?}", working_dir);
         let session = SessionManager::create_session(
-            working_dir,
+            working_dir.clone(),
             session_name,
             SessionType::User,
         ).await.map_err(|e| {
@@ -79,7 +79,7 @@ impl GooseSessionWrapper {
         })?;
 
         let session_id = session.id.clone();
-        info!("Successfully created Goose session with ID: {}", session_id);
+        info!("Successfully created Goose session with ID: {} and working_dir: {:?}", session_id, working_dir);
 
         let session_info = SessionInfo {
             session,

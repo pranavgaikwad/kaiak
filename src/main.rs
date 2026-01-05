@@ -229,43 +229,17 @@ async fn generate_fix_command(
 fn print_notification(notification: &JsonRpcNotification) {
     // Format based on the notification method
     match notification.method.as_str() {
-        "kaiak/generateFix/progress" => {
+        "kaiak/generate_fix/data" => {
             if let Some(params) = &notification.params {
-                let stage = params.get("stage")
+                // Extract kind for context
+                let kind = params.get("kind")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
-                let progress = params.get("progress")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
                 
-                println!("[{:>3}%] {}", progress, stage);
-                
-                // Print additional data if present
-                if let Some(data) = params.get("data") {
-                    if !data.is_null() {
-                        if let Ok(formatted) = serde_json::to_string_pretty(data) {
-                            for line in formatted.lines() {
-                                println!("       {}", line);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        "$/progress" => {
-            // LSP-style progress notification
-            if let Some(params) = &notification.params {
-                if let Some(value) = params.get("value") {
-                    let message = value.get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let percentage = value.get("percentage")
-                        .and_then(|v| v.as_u64());
-                    
-                    if let Some(pct) = percentage {
-                        println!("[{:>3}%] {}", pct, message);
-                    } else {
-                        println!("[...] {}", message);
+                // Print the payload as a string
+                if let Some(payload) = params.get("payload") {
+                    if let Ok(payload_str) = serde_json::to_string(payload) {
+                        println!("[{}] {}", kind, payload_str);
                     }
                 }
             }
@@ -460,5 +434,3 @@ async fn version_command() -> Result<()> {
     println!("Built with Rust {}", rustc_version::version()?);
     Ok(())
 }
-
-// Note: rustc_version and toml dependencies are already added to Cargo.toml

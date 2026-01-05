@@ -10,7 +10,7 @@
 ```
 
 [![CI](https://github.com/pranavgaikwad/kaiak/workflows/CI/badge.svg)](https://github.com/pranavgaikwad/kaiak/actions)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE-APACHE)
 
 Kaiak is a standalone server that orchestrates the Goose AI agent for code migration workflows. It provides LSP-style JSON-RPC communication for IDE extensions, supports real-time concurrent progress streaming, bidirectional notifications, flexible session management and a full-featured CLI client.
 

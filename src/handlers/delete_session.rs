@@ -238,7 +238,6 @@ impl DeleteSessionHandler {
     }
 
     /// Perform session deletion using Goose SessionManager
-    /// User Story 2: Actual session deletion with Goose integration
     async fn perform_session_deletion(&self, session_id: &str, cleanup_options: &SessionCleanupOptions) -> KaiakResult<SessionCleanupResults> {
         debug!("Performing Goose session deletion for: {}", session_id);
 

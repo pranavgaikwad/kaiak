@@ -12,6 +12,7 @@ use super::core::{KaiakRequest, KaiakResponse};
 
 /// JSON-RPC method constants for Kaiak procedures
 pub const GENERATE_FIX: &str = "kaiak/generate_fix";
+pub const GENERATE_FIX_DATA: &str = "kaiak/generate_fix/data";
 pub const DELETE_SESSION: &str = "kaiak/delete_session";
 pub const CLIENT_USER_MESSAGE: &str = "kaiak/client/user_message";
 
