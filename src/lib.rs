@@ -6,13 +6,14 @@
 use anyhow::Result;
 
 
-pub mod server;
-pub mod models;
-pub mod handlers;
 pub mod agent;
+pub mod cli;
 pub mod client;
-pub mod logging;
+pub mod handlers;
 pub mod jsonrpc;
+pub mod logging;
+pub mod models;
+pub mod server;
 
 /// Application-wide error types with context preservation
 #[derive(Debug, Clone, thiserror::Error)]
